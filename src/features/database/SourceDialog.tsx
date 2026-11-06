@@ -101,6 +101,10 @@ const PROPERTIES: Record<string, { names: string[]; hint: string }> = {
     names: ["connect_timeout"],
     hint: "Connection settings for SQL Server.",
   },
+  oracle: {
+    names: [],
+    hint: "Needs Oracle Instant Client on the library path. For a TNS alias or a full descriptor, use the URL (jdbc:oracle:thin:@alias). Session settings go in the startup script (ALTER SESSION SET …).",
+  },
 };
 
 const blankSsh = (): DbSsh => ({
@@ -589,7 +593,7 @@ export function SourceDialog({
           {!urlOnly && (
             <>
               <label className={styles.formLabel} htmlFor="db-database">
-                <T>Database:</T>
+                {s.driver === "oracle" ? <T>Service name:</T> : <T>Database:</T>}
               </label>
               <Input id="db-database" value={s.database ?? ""} onChange={(e) => set({ database: e.target.value })} />
             </>

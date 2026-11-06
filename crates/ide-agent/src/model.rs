@@ -229,6 +229,9 @@ pub struct AgentToolDiff {
     pub path: IpcPath,
     pub added: u32,
     pub removed: u32,
+    /// The changed lines with a little context, each prefixed `+`, `-`, ` ` or `@` (a gap); capped.
+    #[serde(default)]
+    pub preview: String,
 }
 
 /// What a subagent is doing, as its parent reports it.

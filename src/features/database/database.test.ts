@@ -177,7 +177,25 @@ describe("parseSourceUrl", () => {
       file: "C:/data/shop.db",
       name: "shop",
     });
-    expect(parseSourceUrl("oracle://x")).toBeNull();
+    expect(parseSourceUrl("db2://x")).toBeNull();
+  });
+
+  it("reads Oracle thin URLs: service, SID and TNS alias", () => {
+    expect(parseSourceUrl("jdbc:oracle:thin:scott/tiger@//db.local:1522/FREEPDB1")).toEqual({
+      source: { driver: "oracle", user: "scott", host: "db.local", port: 1522, database: "FREEPDB1" },
+      password: "tiger",
+    });
+    expect(parseSourceUrl("jdbc:oracle:thin:@db.local:1521:ORCL")?.source).toEqual({
+      driver: "oracle",
+      user: "",
+      host: "db.local",
+      port: 1521,
+      database: "ORCL",
+    });
+    expect(parseSourceUrl("jdbc:oracle:thin:@PROD_TNS")?.source).toMatchObject({ host: "", database: "PROD_TNS" });
+    expect(sourceUrl({ driver: "oracle", host: "db.local", port: 1521, database: "FREEPDB1" })).toBe(
+      "jdbc:oracle:thin:@//db.local:1521/FREEPDB1",
+    );
   });
 });
 
@@ -190,9 +208,9 @@ describe("data source types", () => {
     });
     expect(vendorPreset(vendorById("postgres")!)).toEqual({ driver: "postgres", vendor: "", port: 5432 });
     expect(vendorPreset(vendorById("supabase")!).ssl).toBe("require");
-    expect(VENDORS.every((v) => ["postgres", "mysql", "sqlite", "sqlServer", "clickhouse"].includes(v.driver))).toBe(
-      true,
-    );
+    expect(
+      VENDORS.every((v) => ["postgres", "mysql", "sqlite", "sqlServer", "clickhouse", "oracle"].includes(v.driver)),
+    ).toBe(true);
     const labels = VENDORS.map((v) => v.label);
     expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
   });

@@ -38,6 +38,7 @@ pub fn explain_statement(driver: DbDriver, statement: &str) -> String {
         DbDriver::Clickhouse => format!("EXPLAIN json = 1 {s}"),
         DbDriver::Mysql => format!("EXPLAIN {s}"),
         DbDriver::SqlServer => format!("SET SHOWPLAN_TEXT ON; {s}"),
+        DbDriver::Oracle => format!("EXPLAIN PLAN SET STATEMENT_ID = '{ORACLE_PLAN_ID}' FOR {s}"),
     }
 }
 
@@ -62,7 +63,45 @@ pub fn parse(driver: DbDriver, result: &QueryResult) -> IdeResult<Vec<PlanNode>>
             Ok(mysql(&names, &result.rows))
         }
         DbDriver::SqlServer => Ok(Vec::new()),
+        DbDriver::Oracle => Ok(oracle(&result.rows)),
     }
+}
+
+/// The `STATEMENT_ID` of the plans OpenIDEA writes to Oracle's `PLAN_TABLE`.
+pub const ORACLE_PLAN_ID: &str = "OPENIDEA";
+
+/// Rows of [`ORACLE_PLAN`] after `EXPLAIN PLAN`, ordered by id.
+pub const ORACLE_PLAN: &str = "SELECT id, parent_id, operation, options, object_owner, object_name, cost, \
+    cardinality, bytes, access_predicates, filter_predicates FROM plan_table \
+    WHERE statement_id = 'OPENIDEA' ORDER BY id";
+
+/// Oracle `PLAN_TABLE` rows (see [`ORACLE_PLAN`]).
+fn oracle(rows: &[Vec<Option<String>>]) -> Vec<PlanNode> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for r in rows {
+        let cell = |i: usize| r.get(i).cloned().flatten().unwrap_or_default();
+        let parent = r.get(1).cloned().flatten().and_then(|p| ids.iter().position(|x| *x == p)).map(|i| i as u32);
+        let operation = format!("{} {}", cell(2), cell(3)).trim().to_owned();
+        let mut params = Vec::new();
+        if !cell(5).is_empty() {
+            params.push(format!("table: {}.{};", cell(4), cell(5)));
+        }
+        if !cell(9).is_empty() {
+            params.push(format!("access: {};", cell(9)));
+        }
+        if !cell(10).is_empty() {
+            params.push(format!("filter: {};", cell(10)));
+        }
+        let properties = [("Cost", 6), ("Rows", 7), ("Bytes", 8)]
+            .into_iter()
+            .filter(|(_, i)| !cell(*i).is_empty())
+            .map(|(name, i)| prop(name, cell(i)))
+            .collect();
+        out.push(PlanNode { parent, operation, params: params.join(" "), properties });
+        ids.push(cell(0));
+    }
+    out
 }
 
 fn prop(name: &str, value: impl Into<String>) -> PlanProperty {

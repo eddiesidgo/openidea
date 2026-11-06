@@ -64,6 +64,7 @@ export const VENDORS: readonly DbVendor[] = [
     icon: "db-oceanbase",
     scheme: "oceanbase",
   },
+  { id: "oracle", label: "Oracle", driver: "oracle", port: 1521, icon: "db-oracle", scheme: "oracle" },
   { id: "postgres", label: "PostgreSQL", driver: "postgres", port: 5432, icon: "db-postgres", scheme: "postgresql" },
   {
     id: "singlestore",
@@ -139,6 +140,7 @@ const SCHEMES: Record<string, string> = {
   oceanbase: "oceanbase",
   sqlserver: "sqlServer",
   mssql: "sqlServer",
+  oracle: "oracle",
 };
 
 export const vendorOfScheme = (scheme: string): DbVendor | undefined => BY_ID.get(SCHEMES[scheme.toLowerCase()] ?? "");
@@ -155,6 +157,11 @@ export function sourceUrl(s: DataSource): string {
   if (v.driver === "clickhouse") {
     const secure = s.ssl != null && s.ssl !== "disable" && s.ssl !== "prefer";
     return `${secure ? "https" : "http"}://${host}:${s.port ?? (secure ? 8443 : 8123)}${db}`;
+  }
+  if (v.driver === "oracle") {
+    // No host: the database field is a TNS alias or descriptor.
+    if (!s.host?.trim()) return `jdbc:oracle:thin:@${s.database ?? ""}`;
+    return `jdbc:oracle:thin:@//${host}${port ? `:${port}` : ""}${s.database ? `/${s.database}` : ""}`;
   }
   return `jdbc:${v.scheme}://${host}${port ? `:${port}` : ""}${db}`;
 }

@@ -80,6 +80,23 @@ export function statementStarters(driver: DbDriver): string[] {
     "ROLLBACK",
   ];
   if (driver === "sqlite") return [...common, "PRAGMA", "VACUUM", "ATTACH DATABASE", "REPLACE INTO", "CREATE TRIGGER"];
+  if (driver === "oracle")
+    return [
+      ...common.filter((w) => w !== "EXPLAIN" && w !== "BEGIN"),
+      "MERGE INTO",
+      "EXPLAIN PLAN FOR",
+      "TRUNCATE TABLE",
+      "CREATE SEQUENCE",
+      "CREATE OR REPLACE VIEW",
+      "CREATE OR REPLACE PROCEDURE",
+      "CREATE OR REPLACE FUNCTION",
+      "CREATE OR REPLACE PACKAGE",
+      "CREATE OR REPLACE TRIGGER",
+      "BEGIN",
+      "DECLARE",
+      "GRANT",
+      "ALTER SESSION SET",
+    ];
   if (driver === "mysql")
     return [
       ...common,
@@ -132,6 +149,7 @@ export function predicateKeywords(driver: DbDriver): string[] {
   if (driver === "postgres") k.push("ILIKE", "IS DISTINCT FROM", "ANY", "SIMILAR TO");
   if (driver === "mysql") k.push("REGEXP");
   if (driver === "sqlite") k.push("GLOB", "REGEXP");
+  if (driver === "oracle") k.push("ANY", "ALL", "SOME");
   return k;
 }
 
@@ -203,6 +221,29 @@ export const DATA_TYPES: Record<DbDriver, string[]> = {
     "BIT",
     "VARBINARY",
     "XML",
+  ],
+  oracle: [
+    "NUMBER",
+    "INTEGER",
+    "VARCHAR2",
+    "NVARCHAR2",
+    "CHAR",
+    "NCHAR",
+    "CLOB",
+    "NCLOB",
+    "BLOB",
+    "RAW",
+    "DATE",
+    "TIMESTAMP",
+    "TIMESTAMP WITH TIME ZONE",
+    "INTERVAL DAY TO SECOND",
+    "BINARY_FLOAT",
+    "BINARY_DOUBLE",
+    "FLOAT",
+    "BOOLEAN",
+    "JSON",
+    "XMLTYPE",
+    "ROWID",
   ],
   clickhouse: [
     "UInt64",
@@ -350,6 +391,30 @@ const FUNCTIONS: Record<DbDriver, SqlFunction[]> = {
     f("newid", "", "uniqueidentifier"),
     f("row_number", "", "bigint"),
     f("rank", "", "bigint"),
+  ],
+  oracle: [
+    ...COMMON,
+    f("nvl", "expr, replacement"),
+    f("nvl2", "expr, if_not_null, if_null"),
+    f("decode", "expr, search, result, ..., default"),
+    f("to_char", "value, format", "varchar2"),
+    f("to_date", "text, format", "date"),
+    f("to_timestamp", "text, format", "timestamp"),
+    f("to_number", "text, format", "number"),
+    f("sysdate", "", "date"),
+    f("systimestamp", "", "timestamp with time zone"),
+    f("trunc", "value, format"),
+    f("add_months", "date, n", "date"),
+    f("months_between", "a, b", "number"),
+    f("last_day", "date", "date"),
+    f("instr", "text, search, start, occurrence", "number"),
+    f("regexp_like", "text, pattern, flags"),
+    f("regexp_substr", "text, pattern, start, occurrence", "varchar2"),
+    f("regexp_replace", "text, pattern, replacement", "varchar2"),
+    f("listagg", "expr, separator", "varchar2", true),
+    f("sys_guid", "", "raw"),
+    f("row_number", "", "number"),
+    f("rank", "", "number"),
   ],
   clickhouse: [
     f("count", "*", "UInt64", true),

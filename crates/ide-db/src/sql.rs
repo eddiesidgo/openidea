@@ -72,6 +72,8 @@ pub fn schemas(driver: DbDriver, system: bool) -> &'static str {
             "SELECT schema_name FROM information_schema.schemata \
              WHERE schema_name NOT IN ('sys', 'information_schema', 'guest') ORDER BY 1"
         }
+        DbDriver::Oracle if system => "SELECT username FROM all_users ORDER BY 1",
+        DbDriver::Oracle => "SELECT username FROM all_users WHERE oracle_maintained = 'N' ORDER BY 1",
     }
 }
 
@@ -105,6 +107,15 @@ pub fn tables(driver: DbDriver, schema: &str) -> String {
              FROM information_schema.tables WHERE table_schema = {} ORDER BY 1",
             quote_literal(driver, schema)
         ),
+        DbDriver::Oracle => {
+            let s = quote_literal(driver, schema);
+            format!(
+                "SELECT table_name, 'table' FROM all_tables WHERE owner = {s} AND dropped = 'NO' \
+                 AND nested = 'NO' AND table_name NOT IN (SELECT mview_name FROM all_mviews WHERE owner = {s}) \
+                 UNION ALL SELECT view_name, 'view' FROM all_views WHERE owner = {s} \
+                 UNION ALL SELECT mview_name, 'materialized view' FROM all_mviews WHERE owner = {s} ORDER BY 1"
+            )
+        }
     }
 }
 
@@ -148,8 +159,24 @@ pub fn columns(driver: DbDriver, schema: &str, table: &str) -> String {
              FROM information_schema.columns c WHERE c.table_schema = {s} AND c.table_name = {t} \
              ORDER BY c.ordinal_position"
         ),
+        DbDriver::Oracle => format!(
+            "SELECT c.column_name, {ORACLE_TYPE}, CASE c.nullable WHEN 'Y' THEN 'YES' ELSE 'NO' END, c.data_default, \
+             CASE WHEN EXISTS (SELECT 1 FROM all_constraints k JOIN all_cons_columns cc \
+               ON cc.owner = k.owner AND cc.constraint_name = k.constraint_name \
+               WHERE k.constraint_type = 'P' AND k.owner = c.owner AND k.table_name = c.table_name \
+               AND cc.column_name = c.column_name) THEN 1 ELSE 0 END \
+             FROM all_tab_columns c WHERE c.owner = {s} AND c.table_name = {t} ORDER BY c.column_id"
+        ),
     }
 }
+
+/// An Oracle column's type with its length or precision (`VARCHAR2(30)`, `NUMBER(10,2)`), from `all_tab_columns c`.
+const ORACLE_TYPE: &str = "CASE WHEN c.data_type IN ('VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR') \
+    THEN c.data_type || '(' || c.char_length || ')' \
+    WHEN c.data_type = 'RAW' THEN 'RAW(' || c.data_length || ')' \
+    WHEN c.data_type = 'NUMBER' AND c.data_precision IS NOT NULL \
+    THEN 'NUMBER(' || c.data_precision || CASE WHEN c.data_scale > 0 THEN ',' || c.data_scale END || ')' \
+    ELSE c.data_type END";
 
 /// Rows: `index name, unique (0/1), column` (one row per indexed column, in order).
 pub fn indexes(driver: DbDriver, schema: &str, table: &str) -> String {
@@ -184,6 +211,11 @@ pub fn indexes(driver: DbDriver, schema: &str, table: &str) -> String {
              JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id \
              WHERE OBJECT_SCHEMA_NAME(i.object_id) = {s} AND OBJECT_NAME(i.object_id) = {t} AND i.name IS NOT NULL \
              ORDER BY i.name, ic.key_ordinal"
+        ),
+        DbDriver::Oracle => format!(
+            "SELECT i.index_name, CASE WHEN i.uniqueness = 'UNIQUE' THEN 1 ELSE 0 END, c.column_name \
+             FROM all_indexes i JOIN all_ind_columns c ON c.index_owner = i.owner AND c.index_name = i.index_name \
+             WHERE i.table_owner = {s} AND i.table_name = {t} ORDER BY i.index_name, c.column_position"
         ),
     }
 }
@@ -245,6 +277,19 @@ pub fn completion_columns(driver: DbDriver) -> &'static str {
              WHERE c.table_schema NOT IN ('sys', 'information_schema') \
              ORDER BY c.table_schema, c.table_name, c.ordinal_position"
         }
+        DbDriver::Oracle => {
+            "SELECT c.owner, c.table_name, CASE WHEN v.view_name IS NOT NULL THEN 'view' ELSE 'table' END, \
+             c.column_name, c.data_type, CASE c.nullable WHEN 'Y' THEN 'YES' ELSE 'NO' END, \
+             CASE WHEN p.column_name IS NOT NULL THEN 1 ELSE 0 END, CASE WHEN c.default_length > 0 THEN 1 ELSE 0 END \
+             FROM all_tab_columns c JOIN all_users u ON u.username = c.owner AND u.oracle_maintained = 'N' \
+             LEFT JOIN all_views v ON v.owner = c.owner AND v.view_name = c.table_name \
+             LEFT JOIN (SELECT cc.owner, cc.table_name, cc.column_name FROM all_constraints k \
+               JOIN all_cons_columns cc ON cc.owner = k.owner AND cc.constraint_name = k.constraint_name \
+               WHERE k.constraint_type = 'P') p \
+             ON p.owner = c.owner AND p.table_name = c.table_name AND p.column_name = c.column_name \
+             WHERE c.table_name NOT LIKE 'BIN$%' \
+             ORDER BY c.owner, c.table_name, c.column_id FETCH FIRST 50000 ROWS ONLY"
+        }
     }
 }
 
@@ -284,6 +329,16 @@ pub fn foreign_keys(driver: DbDriver) -> &'static str {
              AND table_schema NOT IN ('sys', 'information_schema') \
              ORDER BY table_schema, table_name, constraint_name, ordinal_position"
         }
+        DbDriver::Oracle => {
+            "SELECT a.owner, a.table_name, a.constraint_name, ac.column_name, r.owner, r.table_name, rc.column_name \
+             FROM all_constraints a \
+             JOIN all_cons_columns ac ON ac.owner = a.owner AND ac.constraint_name = a.constraint_name \
+             JOIN all_constraints r ON r.owner = a.r_owner AND r.constraint_name = a.r_constraint_name \
+             JOIN all_cons_columns rc ON rc.owner = r.owner AND rc.constraint_name = r.constraint_name \
+             AND rc.position = ac.position \
+             JOIN all_users u ON u.username = a.owner AND u.oracle_maintained = 'N' \
+             WHERE a.constraint_type = 'R' ORDER BY 1, 2, 3, ac.position FETCH FIRST 20000 ROWS ONLY"
+        }
     }
 }
 
@@ -304,6 +359,15 @@ pub fn table_foreign_keys(driver: DbDriver, schema: &str, table: &str) -> String
         DbDriver::SqlServer => format!(
             "SELECT table_schema, table_name, constraint_name, column_name,              referenced_table_schema, referenced_table_name, referenced_column_name              FROM information_schema.key_column_usage WHERE referenced_table_name IS NOT NULL              AND table_schema = {s} AND table_name = {t} ORDER BY constraint_name, ordinal_position"
         ),
+        DbDriver::Oracle => format!(
+            "SELECT a.owner, a.table_name, a.constraint_name, ac.column_name, r.owner, r.table_name, rc.column_name \
+             FROM all_constraints a \
+             JOIN all_cons_columns ac ON ac.owner = a.owner AND ac.constraint_name = a.constraint_name \
+             JOIN all_constraints r ON r.owner = a.r_owner AND r.constraint_name = a.r_constraint_name \
+             JOIN all_cons_columns rc ON rc.owner = r.owner AND rc.constraint_name = r.constraint_name \
+             AND rc.position = ac.position \
+             WHERE a.constraint_type = 'R' AND a.owner = {s} AND a.table_name = {t} ORDER BY 3, ac.position"
+        ),
     }
 }
 
@@ -315,6 +379,7 @@ pub fn current_schema(driver: DbDriver) -> Option<&'static str> {
         DbDriver::Postgres => Some("SELECT current_schema()"),
         DbDriver::Mysql => Some("SELECT DATABASE()"),
         DbDriver::SqlServer => Some("SELECT DB_NAME()"),
+        DbDriver::Oracle => Some("SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM dual"),
     }
 }
 
@@ -354,8 +419,8 @@ pub fn table_page(
             .collect();
         sql.push_str(&format!(" ORDER BY {}", keys.join(", ")));
     }
-    if driver == DbDriver::SqlServer {
-        if sort.is_empty() {
+    if matches!(driver, DbDriver::SqlServer | DbDriver::Oracle) {
+        if sort.is_empty() && driver == DbDriver::SqlServer {
             sql.push_str(" ORDER BY (SELECT 1)");
         }
         sql.push_str(&format!(" OFFSET {offset} ROWS FETCH NEXT {} ROWS ONLY", limit + 1));
@@ -421,6 +486,7 @@ pub fn edit_statement(driver: DbDriver, schema: &str, table: &str, edit: &DbRowE
             if values.is_empty() {
                 return Ok(match driver {
                     DbDriver::Mysql => format!("INSERT INTO {target} () VALUES ()"),
+                    DbDriver::Oracle => return Err("Oracle needs a value for at least one column of a new row".into()),
                     _ => format!("INSERT INTO {target} DEFAULT VALUES"),
                 });
             }
@@ -444,6 +510,18 @@ pub fn sqlite_ddl(schema: &str, name: &str) -> String {
          ORDER BY CASE type WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 0 END, name",
         quote_ident(DbDriver::Sqlite, schema),
         quote_literal(DbDriver::Sqlite, name)
+    )
+}
+
+/// Rows: the DDL of an Oracle table, view or materialized view (`DBMS_METADATA`).
+pub fn oracle_ddl(schema: &str, name: &str) -> String {
+    let d = DbDriver::Oracle;
+    format!(
+        "SELECT DBMS_METADATA.GET_DDL(REPLACE(object_type, ' ', '_'), object_name, owner) FROM all_objects \
+         WHERE owner = {} AND object_name = {} AND object_type IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW') \
+         ORDER BY CASE object_type WHEN 'MATERIALIZED VIEW' THEN 0 ELSE 1 END FETCH FIRST 1 ROWS ONLY",
+        quote_literal(d, schema),
+        quote_literal(d, name)
     )
 }
 
@@ -509,6 +587,12 @@ pub fn triggers(driver: DbDriver, schema: &str, table: &str) -> String {
             "SELECT t.name, lower(te.type_desc), '' FROM sys.triggers t \
              WHERE OBJECT_SCHEMA_NAME(t.parent_id) = {s} AND OBJECT_NAME(t.parent_id) = {t} ORDER BY 1"
         ),
+        DbDriver::Oracle => format!(
+            "SELECT trigger_name, CASE WHEN trigger_type LIKE 'BEFORE%' THEN 'before' \
+             WHEN trigger_type LIKE 'AFTER%' THEN 'after' WHEN trigger_type LIKE 'INSTEAD%' THEN 'instead of' \
+             ELSE lower(trigger_type) END, lower(triggering_event) \
+             FROM all_triggers WHERE table_owner = {s} AND table_name = {t} ORDER BY 1"
+        ),
     }
 }
 
@@ -551,17 +635,30 @@ pub fn routines(driver: DbDriver, schema: &str) -> Option<String> {
             "SELECT r.routine_name, lower(r.routine_type), '', r.data_type \
              FROM information_schema.routines r WHERE r.routine_schema = {s} ORDER BY 1"
         )),
+        DbDriver::Oracle => Some(format!(
+            "SELECT o.object_name, lower(o.object_type), \
+             (SELECT LISTAGG(a.argument_name || ' ' || a.in_out || ' ' || a.data_type, ', ') \
+               WITHIN GROUP (ORDER BY a.position) FROM all_arguments a WHERE a.owner = o.owner \
+               AND a.object_name = o.object_name AND a.package_name IS NULL AND a.position > 0 AND a.data_level = 0), \
+             (SELECT MAX(a.data_type) FROM all_arguments a WHERE a.owner = o.owner AND a.object_name = o.object_name \
+               AND a.package_name IS NULL AND a.position = 0 AND a.data_level = 0) \
+             FROM all_objects o WHERE o.owner = {s} AND o.object_type IN ('FUNCTION', 'PROCEDURE') ORDER BY 1"
+        )),
     }
 }
 
 /// Rows: `name, data type` of a schema's sequences (PostgreSQL).
 pub fn sequences(driver: DbDriver, schema: &str) -> Option<String> {
-    (driver == DbDriver::Postgres).then(|| {
-        format!(
-            "SELECT sequence_name, data_type FROM information_schema.sequences WHERE sequence_schema = {} ORDER BY 1",
-            quote_literal(driver, schema)
-        )
-    })
+    let s = quote_literal(driver, schema);
+    match driver {
+        DbDriver::Postgres => Some(format!(
+            "SELECT sequence_name, data_type FROM information_schema.sequences WHERE sequence_schema = {s} ORDER BY 1"
+        )),
+        DbDriver::Oracle => {
+            Some(format!("SELECT sequence_name, 'NUMBER' FROM all_sequences WHERE sequence_owner = {s} ORDER BY 1"))
+        }
+        _ => None,
+    }
 }
 
 /// The statement reading the definition of a routine (a row per overload), trigger
@@ -606,6 +703,15 @@ pub fn object_ddl(driver: DbDriver, schema: &str, kind: crate::DbObjectKind, nam
         (DbDriver::Mysql, K::Function) => (format!("SHOW CREATE FUNCTION {target}"), 2),
         (DbDriver::Mysql, K::Procedure) => (format!("SHOW CREATE PROCEDURE {target}"), 2),
         (DbDriver::Mysql, K::Trigger) => (format!("SHOW CREATE TRIGGER {target}"), 2),
+        (DbDriver::Oracle, kind) => {
+            let ty = match kind {
+                K::Function => "FUNCTION",
+                K::Procedure => "PROCEDURE",
+                K::Trigger => "TRIGGER",
+                K::Sequence => "SEQUENCE",
+            };
+            (format!("SELECT DBMS_METADATA.GET_DDL('{ty}', {n}, {s}) FROM dual"), 0)
+        }
         _ => return None,
     })
 }

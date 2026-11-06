@@ -19,7 +19,9 @@ export function ident(driver: DbDriver, name: string): string {
       ? /^[a-z_][a-z0-9_$]*$/
       : driver === "clickhouse"
         ? /^[A-Za-z_][A-Za-z0-9_]*$/
-        : /^[A-Za-z_][A-Za-z0-9_$]*$/;
+        : driver === "oracle"
+          ? /^[A-Z][A-Z0-9_$#]*$/
+          : /^[A-Za-z_][A-Za-z0-9_$]*$/;
   return plain.test(name) && !RESERVED.has(name.toUpperCase()) ? name : quoteIdent(driver, name);
 }
 
@@ -87,6 +89,7 @@ export function renameSql(driver: DbDriver, o: DbObjectRef, to: string): string 
       return `alter index ${q} rename to ${ident(driver, to)};`;
     case "view":
       if (driver === "postgres") return `alter view ${q} rename to ${ident(driver, to)};`;
+      if (driver === "oracle") return `rename ${ident(driver, o.name)} to ${ident(driver, to)};`;
       return `rename table ${q} to ${qualifiedName(driver, o.schema, to)};`;
     default:
       if (driver === "mysql" || driver === "clickhouse")
@@ -120,6 +123,7 @@ export function dropSql(driver: DbDriver, o: DbObjectRef, opts: DropOptions): st
         return `drop index ${ident(driver, o.name)} on ${qualifiedName(driver, o.schema, o.table ?? "")};`;
       return `drop index ${ifExists}${qualifiedName(driver, o.schema, o.name)}${cascade};`;
     case "schema":
+      if (driver === "oracle") return `drop user ${ident(driver, o.name)} cascade;`;
       return `drop ${driver === "mysql" || driver === "clickhouse" ? "database" : "schema"} ${ifExists}${ident(driver, o.name)}${cascade};`;
     case "materializedView":
       if (driver === "clickhouse") return `drop table ${ifExists}${qualifiedName(driver, o.schema, o.name)};`;
@@ -147,7 +151,8 @@ export function truncateSql(
 ): string {
   const q = qualifiedName(driver, schema, table);
   if (driver === "sqlite") return `delete from ${q};`;
-  if (driver === "mysql" || driver === "sqlServer" || driver === "clickhouse") return `truncate table ${q};`;
+  if (driver === "mysql" || driver === "sqlServer" || driver === "clickhouse" || driver === "oracle")
+    return `truncate table ${q};`;
   return `truncate table ${q}${opts.restartIdentity ? " restart identity" : ""}${opts.cascade ? " cascade" : ""};`;
 }
 
@@ -177,6 +182,7 @@ export function scriptSql(
     case "selectAll":
       return `select *\nfrom ${q};\n`;
     case "selectFirst":
+      if (driver === "oracle") return `select *\nfrom ${q}\nfetch first 10 rows only;\n`;
       return `select *\nfrom ${q}\nlimit 10;\n`;
     case "insert":
       return `insert into ${q} (${names.join(", ")})\nvalues (${names.map(() => "?").join(", ")});\n`;

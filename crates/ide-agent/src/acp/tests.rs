@@ -144,7 +144,9 @@ fn a_captured_v2_turn_folds_into_the_timeline() {
         (title.as_str(), *status, kind.as_str()),
         ("Write /work/proj/note.txt", AgentToolStatus::Completed, "edit")
     );
-    assert_eq!(diffs, &[AgentToolDiff { path: IpcPath("/work/proj/note.txt".into()), added: 1, removed: 0 }]);
+    let [AgentToolDiff { path, added, removed, preview }] = diffs.as_slice() else { panic!("{diffs:?}") };
+    assert_eq!((path, *added, *removed), (&IpcPath("/work/proj/note.txt".into()), 1, 0));
+    assert!(preview.starts_with('+'), "{preview:?}");
     assert_eq!(e[3], AgentEntry::Agent { text: "done".into() });
 }
 

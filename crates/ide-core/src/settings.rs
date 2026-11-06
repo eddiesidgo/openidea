@@ -78,12 +78,33 @@ pub struct AgentSettings {
     pub show_usage_limits: bool,
     /// What the session has cost so far, as the agent reports it.
     pub show_cost: bool,
+    /// Colour that marks the agent's side of the conversation.
+    pub chat_accent: AgentChatAccent,
 }
 
 impl Default for AgentSettings {
     fn default() -> Self {
-        Self { show_context_usage: true, show_work_time: true, show_usage_limits: true, show_cost: false }
+        Self {
+            show_context_usage: true,
+            show_work_time: true,
+            show_usage_limits: true,
+            show_cost: false,
+            chat_accent: AgentChatAccent::default(),
+        }
     }
+}
+
+/// Accent of agent conversations; `ide` follows the IDE's own accent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentChatAccent {
+    #[default]
+    Orange,
+    Blue,
+    Green,
+    Purple,
+    Pink,
+    Ide,
 }
 
 /// Absent profiles retain automatic discovery for existing projects.

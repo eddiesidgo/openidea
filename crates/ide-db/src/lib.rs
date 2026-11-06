@@ -5,6 +5,7 @@
 mod clickhouse;
 pub mod conn;
 pub mod history;
+mod oracle;
 pub mod plan;
 pub mod secrets;
 pub mod source;
@@ -614,6 +615,7 @@ impl DbManager {
             DbDriver::Postgres | DbDriver::Clickhouse => "SELECT version()",
             DbDriver::Mysql => "SELECT CONCAT(@@version_comment, ' ', VERSION())",
             DbDriver::SqlServer => "SELECT @@VERSION",
+            DbDriver::Oracle => "SELECT banner FROM v$version WHERE ROWNUM = 1",
         };
         let result = pool.rows(version, 1).await;
         pool.close().await;
@@ -898,6 +900,10 @@ impl DbManager {
                 let ddl = cells(pool.rows(&q, 1).await?, 0).into_iter().next();
                 ddl.map(|d| format!("{};\n", d.trim_end().trim_end_matches(';'))).ok_or_else(missing)
             }
+            DbDriver::Oracle => {
+                let ddl = cells(pool.rows(&sql::oracle_ddl(schema, name), 1).await?, 0).into_iter().next();
+                ddl.map(|d| format!("{};\n", d.trim().trim_end_matches(';'))).ok_or_else(missing)
+            }
             DbDriver::SqlServer => {
                 let obj = format!("{}.{}", schema, name).replace('\'', "''");
                 let ddl = cells(pool.rows(&format!("SELECT OBJECT_DEFINITION(OBJECT_ID('{}'))", obj), 1).await?, 0)
@@ -1056,7 +1062,12 @@ impl DbManager {
 
     /// The execution plan of `statement` (explained, not run).
     pub async fn explain(&self, id: &str, statement: &str, cancel: &CancellationToken) -> IdeResult<Vec<PlanNode>> {
-        let driver = self.pool(id).await?.driver();
+        let pool = self.pool(id).await?;
+        let driver = pool.driver();
+        if let Pool::Oracle(p) = &*pool {
+            // The plan is written to the session's PLAN_TABLE: explained and read on one connection.
+            return plan::parse(driver, &p.explain(statement, cancel).await?);
+        }
         let result = self.run(id, &plan::explain_statement(driver, statement), 0, MAX_META_ROWS, cancel).await?;
         plan::parse(driver, &result)
     }

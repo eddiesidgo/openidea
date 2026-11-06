@@ -107,6 +107,7 @@ pub enum Pool {
     Mysql(MySqlPool),
     SqlServer(Bb8Pool<MssqlConnectionManager>),
     Clickhouse(crate::clickhouse::ClickhousePool),
+    Oracle(crate::oracle::OraclePool),
 }
 
 /// Runs `$body` with `$p` bound to the concrete pool of each driver.
@@ -116,7 +117,7 @@ macro_rules! with_pool {
             Pool::Sqlite($p) => $body,
             Pool::Postgres($p) => $body,
             Pool::Mysql($p) => $body,
-            Pool::SqlServer(_) | Pool::Clickhouse(_) => unreachable!(),
+            Pool::SqlServer(_) | Pool::Clickhouse(_) | Pool::Oracle(_) => unreachable!(),
         }
     };
 }
@@ -549,6 +550,7 @@ impl Pool {
             Pool::Mysql(_) => DbDriver::Mysql,
             Pool::SqlServer(_) => DbDriver::SqlServer,
             Pool::Clickhouse(_) => DbDriver::Clickhouse,
+            Pool::Oracle(_) => DbDriver::Oracle,
         }
     }
 
@@ -558,6 +560,9 @@ impl Pool {
         let setup = Setup::of(source)?;
         if source.driver == DbDriver::Clickhouse {
             return crate::clickhouse::ClickhousePool::connect(source, password, setup).await.map(Pool::Clickhouse);
+        }
+        if source.driver == DbDriver::Oracle {
+            return crate::oracle::OraclePool::connect(source, password, setup).await.map(Pool::Oracle);
         }
         let timeout = setup.connect_timeout.unwrap_or(Duration::from_secs(30));
         let init = Arc::new(setup.statements);
@@ -720,7 +725,7 @@ impl Pool {
                 conn.query("SELECT 1", &[]).await.map_err(mssql_err)?.into_results().await.map_err(mssql_err)?;
                 Ok(Pool::SqlServer(pool))
             }
-            DbDriver::Clickhouse => unreachable!(),
+            DbDriver::Clickhouse | DbDriver::Oracle => unreachable!(),
         }
     }
 
@@ -728,6 +733,7 @@ impl Pool {
         match self {
             Pool::SqlServer(_) => {}
             Pool::Clickhouse(p) => p.close(),
+            Pool::Oracle(p) => p.close(),
             _ => with_pool!(self, p => p.close().await),
         }
     }
@@ -736,6 +742,7 @@ impl Pool {
         match self {
             Pool::SqlServer(_) => false,
             Pool::Clickhouse(p) => p.is_closed(),
+            Pool::Oracle(p) => p.is_closed(),
             _ => with_pool!(self, p => p.is_closed()),
         }
     }
@@ -744,6 +751,9 @@ impl Pool {
     pub async fn rows(&self, sql: &str, max: usize) -> IdeResult<Vec<Vec<Option<String>>>> {
         if let Pool::Clickhouse(p) = self {
             return Ok(p.execute(sql, max, &CancellationToken::new()).await?.rows);
+        }
+        if let Pool::Oracle(p) = self {
+            return p.rows(sql, max).await;
         }
         let fetched: IdeResult<Fetched> = match self {
             Pool::SqlServer(p) => {
@@ -773,6 +783,9 @@ impl Pool {
         if let Pool::Clickhouse(p) = self {
             return p.execute_from(sql, skip, max_rows, cancel).await;
         }
+        if let Pool::Oracle(p) = self {
+            return p.execute_from(sql, skip, max_rows, cancel).await;
+        }
         let mut conn = Held::acquire(self).await?;
         let r = conn.execute_from(self, sql, skip, max_rows, cancel).await;
         if cancel.is_cancelled() {
@@ -787,6 +800,7 @@ impl Pool {
     pub async fn transaction(&self, statements: &[(String, bool)]) -> IdeResult<u64> {
         match self {
             Pool::Clickhouse(_) => Err(crate::clickhouse::transaction_error()),
+            Pool::Oracle(p) => p.transaction(statements).await,
             Pool::SqlServer(p) => {
                 let mut conn = p.get_owned().await.map_err(mssql_pool_err)?;
                 let result = async {
@@ -838,6 +852,7 @@ pub enum Held {
     Mysql(PoolConnection<MySql>),
     SqlServer(Box<bb8::PooledConnection<'static, MssqlConnectionManager>>),
     Clickhouse(crate::clickhouse::ClickhousePool),
+    Oracle(crate::oracle::HeldOracle),
 }
 
 impl Held {
@@ -853,6 +868,7 @@ impl Held {
                 }
                 Held::Clickhouse(p.clone())
             }
+            Pool::Oracle(p) => Held::Oracle(crate::oracle::HeldOracle::acquire(p).await?),
         })
     }
 
@@ -861,13 +877,14 @@ impl Held {
         match self {
             Held::SqlServer(c) => mssql_command(c, sql).await,
             Held::Clickhouse(_) => Err(crate::clickhouse::transaction_error()),
+            Held::Oracle(c) => c.command(sql).await,
             other => {
                 let sql = sqlx::AssertSqlSafe(sql.to_owned());
                 match other {
                     Held::Sqlite(c) => sqlx::raw_sql(sql).execute(&mut **c).await.map(drop),
                     Held::Postgres(c) => sqlx::raw_sql(sql).execute(&mut **c).await.map(drop),
                     Held::Mysql(c) => sqlx::raw_sql(sql).execute(&mut **c).await.map(drop),
-                    Held::SqlServer(_) | Held::Clickhouse(_) => unreachable!(),
+                    Held::SqlServer(_) | Held::Clickhouse(_) | Held::Oracle(_) => unreachable!(),
                 }
                 .map_err(db_err)
             }
@@ -889,6 +906,7 @@ impl Held {
                 c.0.take();
             }
             Held::Clickhouse(_) => {}
+            Held::Oracle(c) => c.discard(),
         }
     }
 
@@ -915,6 +933,9 @@ impl Held {
         cancel: &CancellationToken,
     ) -> IdeResult<QueryResult> {
         if let Held::Clickhouse(c) = self {
+            return c.execute_from(sql, skip, max_rows, cancel).await;
+        }
+        if let Held::Oracle(c) = self {
             return c.execute_from(sql, skip, max_rows, cancel).await;
         }
         let started = Instant::now();
@@ -959,7 +980,7 @@ impl Held {
                     () = cancel.cancelled() => return Err(IdeError::cancelled()),
                 }
             }
-            Held::Clickhouse(_) => unreachable!(),
+            Held::Clickhouse(_) | Held::Oracle(_) => unreachable!(),
         };
         let (columns, rows, affected, has_more, first) = fetched;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -980,7 +1001,8 @@ pub fn begin_statement(driver: DbDriver) -> &'static str {
     match driver {
         DbDriver::Mysql => "START TRANSACTION",
         DbDriver::SqlServer => "BEGIN TRAN",
-        DbDriver::Sqlite | DbDriver::Postgres | DbDriver::Clickhouse => "BEGIN",
+        // Oracle opens a transaction with the first change; the held connection ignores `BEGIN`.
+        DbDriver::Sqlite | DbDriver::Postgres | DbDriver::Clickhouse | DbDriver::Oracle => "BEGIN",
     }
 }
 

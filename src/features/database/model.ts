@@ -320,6 +320,27 @@ const SSL_MODES: Record<string, DbSslMode> = {
 };
 
 /**
+ * Oracle's own URL forms: `oracle:thin:[user/password]@//host[:port]/service`,
+ * `oracle:thin:@host:port:SID` and `oracle:thin:@tns_alias` (`oci:` alike).
+ */
+function parseOracleUrl(url: string): { source: Partial<DataSource>; password: string | null } | null {
+  const m = /^oracle:(?:thin:|oci:)?(?:([^/@]*)(?:\/([^@]*))?)?@(.+)$/i.exec(url);
+  if (!m) return null;
+  const target = m[3]!.split("?")[0]!;
+  const source: Partial<DataSource> = { driver: "oracle", user: m[1] ?? "" };
+  const ez = /^\/\/([^:/]+)(?::(\d+))?(?:\/(.*))?$/.exec(target);
+  const sid = /^([^:/()]+):(\d+):(.+)$/.exec(target);
+  if (ez) {
+    Object.assign(source, { host: ez[1], port: ez[2] ? parseInt(ez[2], 10) : 1521, database: ez[3] ?? "" });
+  } else if (sid) {
+    Object.assign(source, { host: sid[1], port: parseInt(sid[2]!, 10), database: sid[3] });
+  } else {
+    Object.assign(source, { host: "", port: null, database: target });
+  }
+  return { source, password: m[2] ?? null };
+}
+
+/**
  * Data Source from URL (and the General tab's URL field): `postgres://user:pass@host:5432/db`,
  * `mysql://…`, `mariadb://…`, wire-compatible products (`redshift://`, `tidb://`…), the
  * `jdbc:` forms of those, `jdbc:sqlite:path` / `sqlite:path`. SSL parameters fill the
@@ -327,6 +348,8 @@ const SSL_MODES: Record<string, DbSslMode> = {
  */
 export function parseSourceUrl(raw: string): { source: Partial<DataSource>; password: string | null } | null {
   const url = raw.trim().replace(/^jdbc:/i, "");
+  const oracle = parseOracleUrl(url);
+  if (oracle) return oracle;
   const sqlite = /^sqlite3?:(?:\/\/)?(.+)$/i.exec(url);
   if (sqlite) {
     const file = sqlite[1]!.replace(/^\/([A-Za-z]:)/, "$1");

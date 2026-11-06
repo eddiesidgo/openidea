@@ -20,6 +20,8 @@ pub enum DbDriver {
     /// Microsoft SQL Server.
     SqlServer,
     Clickhouse,
+    /// Oracle Database, through the Oracle Client libraries (Instant Client).
+    Oracle,
 }
 
 impl DbDriver {
@@ -30,6 +32,7 @@ impl DbDriver {
             DbDriver::Mysql => Some(3306),
             DbDriver::SqlServer => Some(1433),
             DbDriver::Clickhouse => Some(8123),
+            DbDriver::Oracle => Some(1521),
         }
     }
 }
@@ -261,8 +264,44 @@ pub fn scheme_driver(scheme: &str) -> Option<DbDriver> {
         "sqlserver" | "mssql" | "mssqlserver" => Some(DbDriver::SqlServer),
         "sqlite" | "sqlite3" => Some(DbDriver::Sqlite),
         "clickhouse" | "http" | "https" => Some(DbDriver::Clickhouse),
+        "oracle" => Some(DbDriver::Oracle),
         _ => None,
     }
+}
+
+/// Oracle's own URL forms after `oracle:`: `thin:[user/password]@//host[:port]/service`,
+/// `thin:@host:port:SID` and `thin:@tns_alias` (`oci:` alike). A SID is kept as the
+/// service name, which it usually is; an alias is the database with no host.
+fn oracle_url(rest: &str) -> Option<ParsedUrl> {
+    let rest = rest.strip_prefix("thin:").or_else(|| rest.strip_prefix("oci:")).unwrap_or(rest);
+    let (credentials, target) = rest.rsplit_once('@')?;
+    let mut parsed = ParsedUrl { driver: Some(DbDriver::Oracle), ..Default::default() };
+    if !credentials.is_empty() {
+        let (user, password) = credentials.split_once('/').map_or((credentials, None), |(u, p)| (u, Some(p)));
+        parsed.user = percent_decode(user);
+        parsed.password = password.map(percent_decode);
+    }
+    let target = target.split('?').next().unwrap_or_default();
+    if let Some(ez) = target.strip_prefix("//") {
+        let (hostport, service) = ez.split_once('/').unwrap_or((ez, ""));
+        let (host, port) = hostport.rsplit_once(':').map_or((hostport, None), |(h, p)| (h, Some(p)));
+        parsed.host = host.to_owned();
+        parsed.port = match port {
+            Some(p) => Some(p.parse().ok()?),
+            None => None,
+        };
+        parsed.database = service.trim_end_matches('/').to_owned();
+    } else if target.starts_with('(') || !target.contains(':') {
+        // A TNS descriptor or alias: used as the connect string as it is.
+        parsed.host = String::new();
+        parsed.database = target.to_owned();
+    } else {
+        let mut parts = target.splitn(3, ':');
+        parsed.host = parts.next()?.to_owned();
+        parsed.port = Some(parts.next()?.parse().ok()?);
+        parsed.database = parts.next().unwrap_or_default().to_owned();
+    }
+    Some(parsed)
 }
 
 /// Parses `scheme://[user[:password]@]host[:port][/database][?k=v&…]`, `jdbc:` forms
@@ -280,6 +319,9 @@ pub fn parse_url(raw: &str) -> IdeResult<ParsedUrl> {
             return Err(bad());
         }
         return Ok(ParsedUrl { driver: Some(driver), file: Some(percent_decode(file)), ..Default::default() });
+    }
+    if driver == DbDriver::Oracle && !rest.starts_with("//") {
+        return oracle_url(rest).ok_or_else(bad);
     }
     let rest = rest.strip_prefix("//").ok_or_else(bad)?;
     let (main, query) = rest.split_once('?').unwrap_or((rest, ""));
@@ -538,9 +580,18 @@ mod tests {
         let u = parse_url("mysql://[::1]/app?user=root").unwrap();
         assert_eq!((u.host.as_str(), u.port, u.user.as_str()), ("::1", None, "root"));
         assert_eq!(parse_url("jdbc:redshift://r:5439/dev").unwrap().driver, Some(DbDriver::Postgres));
+        let o = parse_url("jdbc:oracle:thin:scott/tiger@//db.local:1522/FREEPDB1").unwrap();
+        assert_eq!(
+            (o.driver, o.host.as_str(), o.port, o.database.as_str(), o.user.as_str(), o.password.as_deref()),
+            (Some(DbDriver::Oracle), "db.local", Some(1522), "FREEPDB1", "scott", Some("tiger"))
+        );
+        let o = parse_url("jdbc:oracle:thin:@db.local:1521:ORCL").unwrap();
+        assert_eq!((o.host.as_str(), o.port, o.database.as_str()), ("db.local", Some(1521), "ORCL"));
+        let o = parse_url("jdbc:oracle:thin:@PROD_TNS").unwrap();
+        assert_eq!((o.host.as_str(), o.database.as_str()), ("", "PROD_TNS"));
         assert_eq!(parse_url("tidb://h:4000").unwrap().driver, Some(DbDriver::Mysql));
         assert_eq!(parse_url("sqlite:/tmp/a.db").unwrap().file.as_deref(), Some("/tmp/a.db"));
-        assert!(parse_url("oracle://x").is_err());
+        assert!(parse_url("db2://x").is_err());
         assert!(parse_url("postgres://h:99999/db").is_err());
     }
 

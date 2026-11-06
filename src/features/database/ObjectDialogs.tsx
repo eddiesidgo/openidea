@@ -270,6 +270,19 @@ const TYPES: Record<DbDriver, string[]> = {
     "varbinary(max)",
   ],
   clickhouse: ["UInt64", "Int64", "Float64", "String", "Bool", "Date", "DateTime", "UUID", "Nullable(String)"],
+  oracle: [
+    "NUMBER",
+    "NUMBER(10)",
+    "NUMBER(10,2)",
+    "VARCHAR2(255)",
+    "NVARCHAR2(255)",
+    "CHAR(1)",
+    "CLOB",
+    "BLOB",
+    "DATE",
+    "TIMESTAMP",
+    "RAW(16)",
+  ],
 };
 
 interface ModifyProps {

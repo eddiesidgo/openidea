@@ -159,8 +159,14 @@ impl Timeline {
                 Some("diff") => {
                     let old = item.get("oldText").and_then(Value::as_str).unwrap_or_default();
                     let new = item.get("newText").and_then(Value::as_str).unwrap_or_default();
-                    let (added, removed) = line_stats(old, new);
-                    new_diffs.push(AgentToolDiff { path: IpcPath(str_field(item, "path").into()), added, removed });
+                    let hunks = ide_vcs::diff_hunks(old, new);
+                    let (added, removed) = hunks.iter().fold((0, 0), |(a, r), h| (a + h.lines, r + h.old_lines));
+                    new_diffs.push(AgentToolDiff {
+                        path: IpcPath(str_field(item, "path").into()),
+                        added,
+                        removed,
+                        preview: diff_preview(new, &hunks),
+                    });
                 }
                 _ => {}
             }
@@ -367,8 +373,35 @@ fn locations(v: Option<&Value>) -> Vec<IpcPath> {
         .unwrap_or_default()
 }
 
-fn line_stats(old: &str, new: &str) -> (u32, u32) {
-    ide_vcs::diff_hunks(old, new).iter().fold((0, 0), |(a, r), h| (a + h.lines, r + h.old_lines))
+const PREVIEW_CONTEXT: usize = 2;
+const PREVIEW_MAX_LINES: usize = 200;
+
+/// Changed lines of `hunks` (against `new`) with `PREVIEW_CONTEXT` lines around each.
+fn diff_preview(new: &str, hunks: &[ide_vcs::LineHunk]) -> String {
+    let lines: Vec<&str> = new.lines().collect();
+    let mut out: Vec<String> = Vec::new();
+    // Next line of `new` not yet shown as context.
+    let mut shown = 0usize;
+    for h in hunks {
+        let start = h.start as usize;
+        let end = (start + h.lines as usize).min(lines.len());
+        let from = start.saturating_sub(PREVIEW_CONTEXT).max(shown);
+        if from > shown {
+            out.push(format!("@{}", from + 1));
+        }
+        out.extend(lines[from.min(start)..start.min(lines.len())].iter().map(|l| format!(" {l}")));
+        out.extend(h.old_text.lines().map(|l| format!("-{l}")));
+        out.extend(lines[start.min(end)..end].iter().map(|l| format!("+{l}")));
+        let after = (end + PREVIEW_CONTEXT).min(lines.len());
+        out.extend(lines[end..after].iter().map(|l| format!(" {l}")));
+        shown = after;
+        if out.len() > PREVIEW_MAX_LINES {
+            out.truncate(PREVIEW_MAX_LINES);
+            out.push("@…".into());
+            break;
+        }
+    }
+    out.join("\n")
 }
 
 fn tail(mut text: String) -> String {
@@ -418,7 +451,15 @@ mod tests {
         assert_eq!(applied.changed, vec![0]);
         let AgentEntry::Tool { status, diffs, output, locations, .. } = &t.entries[0] else { panic!() };
         assert_eq!(*status, AgentToolStatus::Completed);
-        assert_eq!(diffs, &vec![AgentToolDiff { path: IpcPath("/p/a.rs".into()), added: 2, removed: 1 }]);
+        assert_eq!(
+            diffs,
+            &vec![AgentToolDiff {
+                path: IpcPath("/p/a.rs".into()),
+                added: 2,
+                removed: 1,
+                preview: " a\n-b\n+B\n+c".into(),
+            }]
+        );
         assert_eq!(output.as_deref(), Some("done"));
         assert_eq!(locations, &vec![IpcPath("/p/a.rs".into())]);
         // Unknown calls are ignored.

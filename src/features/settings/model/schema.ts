@@ -161,7 +161,7 @@ export const DEFAULT_SETTINGS: ValidSettings = {
   spelling: { ideWords: [], projectWords: [], customDictionaries: [] },
   tools: {},
   languageServers: {},
-  agents: { showContextUsage: true, showWorkTime: true, showUsageLimits: true, showCost: false },
+  agents: { showContextUsage: true, showWorkTime: true, showUsageLimits: true, showCost: false, chatAccent: "orange" },
   ...DEFAULT_WORKFLOW,
 };
 
@@ -181,6 +181,8 @@ type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const str = (v: unknown, d: string) => (typeof v === "string" && v.trim() ? v : d);
+const CHAT_ACCENTS = ["orange", "blue", "green", "purple", "pink", "ide"] as const;
+
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], d: T): T =>
   typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : d;
 const num = (v: unknown, d: number, { min, max }: { min: number; max: number }, int = false) => {
@@ -279,6 +281,7 @@ export function validateSettings(raw: Settings | unknown): ValidSettings {
       showWorkTime: bool(agents.showWorkTime, d.agents.showWorkTime),
       showUsageLimits: bool(agents.showUsageLimits, d.agents.showUsageLimits),
       showCost: bool(agents.showCost, d.agents.showCost),
+      chatAccent: oneOf(agents.chatAccent, CHAT_ACCENTS, d.agents.chatAccent),
     },
     ...validateWorkflow(root),
   };

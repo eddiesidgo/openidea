@@ -629,8 +629,39 @@ export const TOOLS_PAGES: PageSpec[] = [
     title: "Chat",
     group: TOOLS_GROUP,
     order: 0,
-    keywords: ["agent", "claude", "codex", "usage", "quota", "rate limit", "cost", "tokens", "meter"],
+    keywords: [
+      "agent",
+      "claude",
+      "codex",
+      "usage",
+      "quota",
+      "rate limit",
+      "cost",
+      "tokens",
+      "meter",
+      "color",
+      "accent",
+    ],
     sections: [
+      {
+        title: "Appearance",
+        options: [
+          {
+            kind: "select",
+            key: "agents.chatAccent",
+            label: "Accent color",
+            hint: "Marks the agent's replies, tool calls and the composer",
+            options: [
+              { value: "orange", label: "Orange" },
+              { value: "blue", label: "Blue" },
+              { value: "green", label: "Green" },
+              { value: "purple", label: "Purple" },
+              { value: "pink", label: "Pink" },
+              { value: "ide", label: "IDE accent" },
+            ],
+          },
+        ],
+      },
       {
         title: "Shown in the Task Header",
         options: [

@@ -29,6 +29,9 @@ enum State {
 pub fn split(text: &str, driver: DbDriver) -> Vec<SqlStatement> {
     let mysql = driver == DbDriver::Mysql;
     let clickhouse = driver == DbDriver::Clickhouse;
+    let oracle = driver == DbDriver::Oracle;
+    // Oracle PL/SQL: `;` ends its inner statements; a line holding only `/` ends the block.
+    let mut plsql = false;
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     // UTF-16 offset of each char index (plus the end).
     let mut u16_at = Vec::with_capacity(chars.len() + 1);
@@ -69,6 +72,13 @@ pub fn split(text: &str, driver: DbDriver) -> Vec<SqlStatement> {
         let next = chars.get(i + 1).map(|c| c.1);
         match state {
             State::Code => match c {
+                '/' if oracle && alone_on_line(text, byte_at(i)) => {
+                    push(&mut out, start, i, has_code);
+                    start = i + 1;
+                    has_code = false;
+                    plsql = false;
+                }
+                ';' if plsql => {}
                 ';' => {
                     push(&mut out, start, i, has_code);
                     start = i + 1;
@@ -114,7 +124,12 @@ pub fn split(text: &str, driver: DbDriver) -> Vec<SqlStatement> {
                         continue;
                     }
                 }
-                c if !c.is_whitespace() => has_code = true,
+                c if !c.is_whitespace() => {
+                    if oracle && !has_code {
+                        plsql = starts_plsql(&text[byte_at(i)..]);
+                    }
+                    has_code = true;
+                }
                 _ => {}
             },
             State::Single => {
@@ -162,6 +177,34 @@ pub fn split(text: &str, driver: DbDriver) -> Vec<SqlStatement> {
     }
     push(&mut out, start, chars.len(), has_code);
     out
+}
+
+/// Whether the byte at `at` (a `/`) is the only thing on its line but whitespace.
+fn alone_on_line(text: &str, at: usize) -> bool {
+    let line_start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+    text[line_start..at].trim().is_empty() && text[at + 1..line_end].trim().is_empty()
+}
+
+/// Whether `sql` starts an Oracle PL/SQL block (an anonymous block or a stored unit's
+/// source), which keeps its `;`s and ends at a `/` line.
+pub(crate) fn starts_plsql(sql: &str) -> bool {
+    let words: Vec<String> = sql.split_whitespace().take(6).map(str::to_ascii_uppercase).collect();
+    let mut w = words.iter().map(String::as_str).peekable();
+    match w.next() {
+        Some("BEGIN" | "DECLARE") => true,
+        Some("CREATE") => {
+            if w.peek() == Some(&"OR") {
+                w.next();
+                w.next();
+            }
+            if matches!(w.peek(), Some(&"EDITIONABLE" | &"NONEDITIONABLE")) {
+                w.next();
+            }
+            matches!(w.next(), Some("PROCEDURE" | "FUNCTION" | "PACKAGE" | "TRIGGER" | "TYPE" | "LIBRARY"))
+        }
+        _ => false,
+    }
 }
 
 /// The statement to run for a caret at `offset` (UTF-16): the one containing
@@ -247,6 +290,23 @@ mod tests {
                 "do $x$ begin; end $x$"
             ]
         );
+    }
+
+    #[test]
+    fn oracle_plsql_blocks_end_at_a_slash_line() {
+        let sql = "select 1 from dual;\ncreate or replace procedure p is\nbegin\n  null;\nend;\n/\n\
+                   begin\n  p;\nend;\n/\nselect a / b from t;";
+        assert_eq!(
+            texts(sql, DbDriver::Oracle),
+            vec![
+                "select 1 from dual",
+                "create or replace procedure p is\nbegin\n  null;\nend;",
+                "begin\n  p;\nend;",
+                "select a / b from t"
+            ]
+        );
+        assert!(starts_plsql("CREATE OR REPLACE EDITIONABLE PACKAGE BODY k AS"));
+        assert!(!starts_plsql("create table t (a int)"));
     }
 
     #[test]

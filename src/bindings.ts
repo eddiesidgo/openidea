@@ -1330,6 +1330,9 @@ export type AgentChange = {
 	removed: number,
 };
 
+/**  Accent of agent conversations; `ide` follows the IDE's own accent. */
+export type AgentChatAccent = "orange" | "blue" | "green" | "purple" | "pink" | "ide";
+
 export type AgentCommand = {
 	/**  Without the leading `/`. */
 	name: string,
@@ -1541,6 +1544,8 @@ export type AgentSettings = {
 	showUsageLimits?: boolean,
 	/**  What the session has cost so far, as the agent reports it. */
 	showCost?: boolean,
+	/**  Colour that marks the agent's side of the conversation. */
+	chatAccent?: AgentChatAccent,
 };
 
 /**  Where an agent comes from. */
@@ -1615,6 +1620,8 @@ export type AgentToolDiff = {
 	path: IpcPath,
 	added: number,
 	removed: number,
+	/**  The changed lines with a little context, each prefixed `+`, `-`, ` ` or `@` (a gap); capped. */
+	preview?: string,
 };
 
 export type AgentToolStatus = "pending" | "running" | "completed" | "failed";
@@ -2630,7 +2637,9 @@ export type DbDriver = "sqlite" | "postgres" |
 /**  MySQL and MariaDB. */
 "mysql" | 
 /**  Microsoft SQL Server. */
-"sqlServer" | "clickhouse";
+"sqlServer" | "clickhouse" | 
+/**  Oracle Database, through the Oracle Client libraries (Instant Client). */
+"oracle";
 
 /**  `schema.table (columns) REFERENCES ref_schema.ref_table (ref_columns)`. */
 export type DbForeignKey = {

@@ -8,6 +8,35 @@
   color: var(--fg);
 }
 
+/* The conversation's accent (Settings › Tools › Agents › Chat). Re-derived here so the
+   composer's focus ring and Send button follow it too. */
+.session {
+  --agent-accent: var(--accent);
+}
+.session[data-accent="orange"] {
+  --agent-accent: var(--agent-accent-orange);
+}
+.session[data-accent="blue"] {
+  --agent-accent: var(--agent-accent-blue);
+}
+.session[data-accent="green"] {
+  --agent-accent: var(--agent-accent-green);
+}
+.session[data-accent="purple"] {
+  --agent-accent: var(--agent-accent-purple);
+}
+.session[data-accent="pink"] {
+  --agent-accent: var(--agent-accent-pink);
+}
+.session:not([data-accent="ide"]) {
+  --accent: var(--agent-accent);
+  --accent-soft: color-mix(in srgb, var(--agent-accent) 16%, transparent);
+  --accent-hover: color-mix(in srgb, var(--agent-accent) 86%, var(--fg-strong));
+  --bg-button-primary: var(--agent-accent);
+  --bg-button-primary-hover: var(--accent-hover);
+  --focus-ring: var(--agent-accent);
+}
+
 .conversation {
   display: flex;
   flex-direction: column;
@@ -214,12 +243,59 @@
   background-color: var(--bg-text-search-result-current);
 }
 
+/* Your messages: a box of their own, apart from the agent's timeline. */
 .user {
-  padding: 2px 0 2px 10px;
-  border-left: 2px solid var(--accent);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
   color: var(--fg-strong);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.message + .item,
+.item + .message {
+  margin-top: 6px;
+}
+
+/* The agent's side: a dot per reply, thought and tool call, coloured by what it is. */
+.item {
+  position: relative;
+  padding-left: 18px;
+  min-width: 0;
+}
+.item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+}
+.agentItem::before {
+  background: var(--agent-accent);
+}
+.itemDone::before {
+  background: var(--success);
+}
+.itemFailed::before {
+  background: var(--danger);
+}
+.itemWorking::before {
+  background: var(--agent-accent);
+  animation: agentPulse 1.2s ease-in-out infinite;
+}
+@keyframes agentPulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .itemWorking::before {
+    animation: none;
+  }
 }
 
 .editMessage {
@@ -262,28 +338,49 @@
 .markdown :global(code) {
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  padding: 0 4px;
-  border-radius: 3px;
+  padding: 1px 5px;
+  border-radius: 4px;
   background: var(--bg-elev);
+  color: color-mix(in srgb, var(--agent-accent) 55%, var(--fg-strong));
+}
+.markdown :global(pre code) {
+  color: var(--fg);
 }
 .markdown :global(pre) {
   margin: 0 0 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-small);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--bg-elev);
-  overflow: auto;
+  overflow: hidden;
 }
 .markdown :global(pre code) {
-  padding: 0;
+  display: block;
+  padding: 8px 12px;
+  overflow-x: auto;
   background: none;
+  border-radius: 0;
 }
-.markdown :global(pre) {
-  position: relative;
+.codeHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--agent-accent) 6%, var(--bg-elev));
+  font-family: var(--font-ui, inherit);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.codeLang {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+  text-transform: lowercase;
 }
 .codeCopy {
-  position: absolute;
-  top: 4px;
-  right: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -295,14 +392,11 @@
   background: var(--bg-elev);
   color: var(--fg-secondary);
   cursor: pointer;
-  opacity: 0;
-}
-.markdown :global(pre:hover) .codeCopy,
-.codeCopy:focus-visible {
-  opacity: 1;
+  background: transparent;
 }
 .codeCopy:hover {
   background: var(--bg-hover);
+  color: var(--fg-strong);
 }
 .fileLink {
   color: var(--link);
@@ -396,23 +490,29 @@
   white-space: pre-wrap;
 }
 
-.tool {
+.toolItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.toolHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 2px 8px;
-  margin-left: -8px;
-  border-radius: var(--radius-row);
   color: var(--fg-secondary);
-  width: fit-content;
-  max-width: 100%;
 }
-.toolDetails > summary.tool:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
+.toolIcon {
+  flex: none;
+  color: var(--fg-muted);
+}
+.toolKind {
+  flex: none;
+  font-weight: 600;
+  color: var(--fg-strong);
 }
 .toolTitle {
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   white-space: nowrap;
@@ -420,6 +520,7 @@
   text-overflow: ellipsis;
 }
 .toolDiff {
+  flex: none;
   font: inherit;
   font-size: var(--fs-small);
   border: 0;
@@ -432,18 +533,157 @@
 .toolDiff:hover {
   background: var(--bg-hover);
 }
+.toolDetails > summary.toolSummary {
+  width: fit-content;
+  padding: 0 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-row);
+  color: var(--fg-muted);
+  font-size: var(--fs-small);
+}
+.toolDetails > summary.toolSummary::before {
+  content: "▸ ";
+}
+.toolDetails[open] > summary.toolSummary::before {
+  content: "▾ ";
+}
+.toolDetails > summary.toolSummary:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
 .output {
   margin: 4px 0 0;
   max-height: 240px;
   overflow: auto;
   padding: 8px 10px;
-  border-radius: var(--radius-small);
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-elev);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   white-space: pre-wrap;
   color: var(--fg-secondary);
+}
+
+/* A shell call: the command and what it printed, as Claude Code shows them. */
+.io {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.ioLabel {
+  padding: 6px 8px;
+  border-right: 1px solid var(--border);
+  color: var(--fg-subtle);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ioCode {
+  margin: 0;
+  padding: 6px 10px;
+  max-height: 200px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+.ioLabel:nth-of-type(2),
+.ioOut {
+  border-top: 1px solid var(--border);
+}
+.ioOut {
+  color: var(--fg-secondary);
+}
+
+/* Changed lines of an edited file. */
+.diffBox {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.diffBox > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.diffBox > summary::-webkit-details-marker {
+  display: none;
+}
+.diffHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+}
+.diffBox[open] > .diffHead {
+  border-bottom: 1px solid var(--border);
+}
+.diffFile {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.diffFile:hover {
+  text-decoration: underline;
+}
+.diffLines {
+  max-height: 360px;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.diffLine {
+  min-width: fit-content;
+  padding: 0 10px 0 0;
+  white-space: pre;
+  color: var(--fg-secondary);
+}
+.diffSign {
+  display: inline-block;
+  width: 22px;
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.diffAdded {
+  background: color-mix(in srgb, var(--vcs-added) 16%, transparent);
+  color: var(--fg);
+}
+.diffAdded .diffSign {
+  color: var(--vcs-added);
+}
+.diffRemoved {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--fg);
+}
+.diffRemoved .diffSign {
+  color: var(--danger);
+}
+.diffGap {
+  padding-left: 22px;
+  color: var(--fg-subtle);
 }
 
 .plan {

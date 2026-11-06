@@ -87,6 +87,7 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
   const entries = useAgents((s) => s.entries.get(id));
   const changes = useAgents((s) => s.changes.get(id));
   const project = useProject((s) => s.project);
+  const accent = useProject((s) => s.settings?.agents?.chatAccent) ?? "orange";
   const head = useLocalHead(
     task?.isolation === "local" ? task.status : null,
     project?.workspace ? (task?.projectRoot ?? project.root) : null,
@@ -132,6 +133,7 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
   return (
     <div
       className={clsx(styles.session, docked && styles.docked)}
+      data-accent={accent}
       onFocusCapture={() => setFocusedSession(session)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null) && focusedSession() === session) {
@@ -744,10 +746,14 @@ function Entry({
     case "user":
       return <UserMessage task={task} entry={entry} turn={turn} turnCount={turnCount} />;
     case "agent":
-      return <Markdown text={entry.text} cwd={task.cwd} />;
+      return (
+        <div className={clsx(styles.item, styles.agentItem)}>
+          <Markdown text={entry.text} cwd={task.cwd} />
+        </div>
+      );
     case "thought":
       return (
-        <details className={styles.thought}>
+        <details className={clsx(styles.item, styles.thought)}>
           <summary>
             <T>Thinking</T>
           </summary>
@@ -1024,34 +1030,140 @@ function ImageStrip({ images, onRemove }: { images: AgentImage[]; onRemove?: (in
   );
 }
 
-function ToolEntry({ task, entry }: { task: AgentTask; entry: Extract<AgentEntry, { type: "tool" }> }) {
-  const head = (
-    <>
-      <Icon name={TOOL_ICONS[entry.kind] ?? "run"} size={14} />
-      <span className={styles.toolTitle}>{shortTitle(task, entry.title || entry.kind)}</span>
-      {entry.diffs.map((d) => (
+const TOOL_LABELS: Record<string, string> = {
+  read: "Read",
+  edit: "Edit",
+  delete: "Delete",
+  move: "Move",
+  search: "Search",
+  execute: "Shell",
+  fetch: "Fetch",
+  think: "Think",
+};
+
+type ToolEntryData = Extract<AgentEntry, { type: "tool" }>;
+
+/**
+ * A tool call on the agent's timeline: what it is, its status as the dot's colour, the
+ * command and its output for shell calls, and the changed lines of each file it edited.
+ */
+function ToolEntry({ task, entry }: { task: AgentTask; entry: ToolEntryData }) {
+  const working = entry.status === "running" || entry.status === "pending";
+  const shell = entry.kind === "execute";
+  const title = shortTitle(task, entry.title || entry.kind);
+  const label = TOOL_LABELS[entry.kind];
+  return (
+    <div
+      className={clsx(
+        styles.item,
+        styles.toolItem,
+        working && styles.itemWorking,
+        entry.status === "failed" && styles.itemFailed,
+        entry.status === "completed" && styles.itemDone,
+      )}
+    >
+      <div className={styles.toolHead}>
+        <Icon name={TOOL_ICONS[entry.kind] ?? "run"} size={13} className={styles.toolIcon} />
+        {label && (
+          <span className={styles.toolKind}>
+            <T>{label}</T>
+          </span>
+        )}
+        {!shell && (
+          <span className={styles.toolTitle} title={title}>
+            {title}
+          </span>
+        )}
+        {entry.diffs.map((d) => (
+          <button
+            key={d.path}
+            type="button"
+            className={styles.toolDiff}
+            title={d.path}
+            onClick={() => void openChangeDiff(task, d.path)}
+          >
+            <span className={styles.added}>+{d.added}</span> <span className={styles.removed}>−{d.removed}</span>
+          </button>
+        ))}
+        {working && <Spinner size={12} />}
+      </div>
+      {shell ? (
+        <div className={styles.io}>
+          <span className={styles.ioLabel}>
+            <T>IN</T>
+          </span>
+          <pre className={styles.ioCode}>{title}</pre>
+          {entry.output && (
+            <>
+              <span className={styles.ioLabel}>
+                <T>OUT</T>
+              </span>
+              <pre className={clsx(styles.ioCode, styles.ioOut)}>{entry.output}</pre>
+            </>
+          )}
+        </div>
+      ) : (
+        entry.output &&
+        entry.diffs.length === 0 && (
+          <details className={styles.toolDetails}>
+            <summary className={styles.toolSummary}>
+              <T>Output</T>
+            </summary>
+            <pre className={styles.output}>{entry.output}</pre>
+          </details>
+        )
+      )}
+      {entry.diffs.map((d) => d.preview && <DiffPreview key={d.path} task={task} diff={d} />)}
+    </div>
+  );
+}
+
+/** Lines kept open when a diff preview first shows; longer ones start collapsed. */
+const DIFF_OPEN_LINES = 40;
+
+function DiffPreview({ task, diff }: { task: AgentTask; diff: ToolEntryData["diffs"][number] }) {
+  const lines = (diff.preview ?? "").split("\n");
+  return (
+    <details className={styles.diffBox} open={lines.length <= DIFF_OPEN_LINES}>
+      <summary className={styles.diffHead}>
+        <Icon name={fileIconName(basename(diff.path), diff.path)} size={14} />
         <button
-          key={d.path}
           type="button"
-          className={styles.toolDiff}
-          title={d.path}
+          className={styles.diffFile}
+          title={diff.path}
           onClick={(e) => {
             e.preventDefault();
-            void openChangeDiff(task, d.path);
+            void openChangeDiff(task, diff.path);
           }}
         >
-          <span className={styles.added}>+{d.added}</span> <span className={styles.removed}>−{d.removed}</span>
+          {shortTitle(task, diff.path)}
         </button>
-      ))}
-      {(entry.status === "running" || entry.status === "pending") && <Spinner size={12} />}
-      {entry.status === "failed" && <Icon name="error" size={12} />}
-    </>
-  );
-  if (!entry.output) return <div className={styles.tool}>{head}</div>;
-  return (
-    <details className={styles.toolDetails}>
-      <summary className={styles.tool}>{head}</summary>
-      <pre className={styles.output}>{entry.output}</pre>
+        <span className={styles.added}>+{diff.added}</span>
+        <span className={styles.removed}>−{diff.removed}</span>
+      </summary>
+      <div className={styles.diffLines}>
+        {lines.map((line, i) => {
+          const sign = line[0];
+          if (sign === "@") {
+            return (
+              <div key={i} className={clsx(styles.diffLine, styles.diffGap)}>
+                ⋯
+              </div>
+            );
+          }
+          return (
+            <div
+              key={i}
+              className={clsx(styles.diffLine, sign === "+" && styles.diffAdded, sign === "-" && styles.diffRemoved)}
+            >
+              <span className={styles.diffSign} aria-hidden>
+                {sign === " " ? "" : sign}
+              </span>
+              {line.slice(1)}
+            </div>
+          );
+        })}
+      </div>
     </details>
   );
 }

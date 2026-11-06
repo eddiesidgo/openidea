@@ -8,8 +8,18 @@ describe("agent chat settings", () => {
       showWorkTime: true,
       showUsageLimits: true,
       showCost: false,
+      chatAccent: "orange",
     });
-    const stored = validateSettings({ agents: { showUsageLimits: false, showCost: true, showWorkTime: "no" } }).agents;
-    expect(stored).toEqual({ showContextUsage: true, showWorkTime: true, showUsageLimits: false, showCost: true });
+    const stored = validateSettings({
+      agents: { showUsageLimits: false, showCost: true, showWorkTime: "no", chatAccent: "teal" },
+    }).agents;
+    expect(stored).toEqual({
+      showContextUsage: true,
+      showWorkTime: true,
+      showUsageLimits: false,
+      showCost: true,
+      chatAccent: "orange",
+    });
+    expect(validateSettings({ agents: { chatAccent: "purple" } }).agents.chatAccent).toBe("purple");
   });
 });

@@ -100,6 +100,11 @@ function enhance(root: HTMLElement, cwd: string): () => void {
     const text = (code.textContent ?? "").replace(/\n+$/, "");
     code.textContent = text;
     void highlightInto(code, text, lang);
+    const header = document.createElement("div");
+    header.className = styles.codeHeader!;
+    const name = document.createElement("span");
+    name.className = styles.codeLang!;
+    name.textContent = lang ?? "";
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = styles.codeCopy!;
@@ -108,7 +113,8 @@ function enhance(root: HTMLElement, cwd: string): () => void {
     copy.setAttribute("aria-label", label);
     copy.appendChild(iconNode("copy", 14));
     copy.dataset.copy = text;
-    pre.appendChild(copy);
+    header.append(name, copy);
+    pre.prepend(header);
   });
   root.querySelectorAll<HTMLElement>("code").forEach((code) => {
     if (code.parentElement?.tagName === "PRE" || code.closest("a")) return;

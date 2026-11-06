@@ -6302,5 +6302,16 @@
   "Composer dependencies are not installed": "未安装 Composer 依赖",
   "Installed Composer packages differ from composer.lock": "已安装的 Composer 包与 composer.lock 不一致",
   "Composer Install": "安装 Composer 依赖",
-  "Input for the program (pause to evaluate)": "程序输入（暂停后可计算）"
+  "Input for the program (pause to evaluate)": "程序输入（暂停后可计算）",
+  "IN": "输入",
+  "OUT": "输出",
+  "Marks the agent's replies, tool calls and the composer": "用于标记智能体的回复、工具调用和输入框",
+  "Pink": "粉色",
+  "IDE accent": "IDE 强调色",
+  "Shell": "Shell",
+  "Think": "思考",
+  "Read": "读取",
+  "Needs Oracle Instant Client on the library path. For a TNS alias or a full descriptor, use the URL (jdbc:oracle:thin:@alias). Session settings go in the startup script (ALTER SESSION SET …).": "需要在库路径中安装 Oracle Instant Client。使用 TNS 别名或完整描述符时，请填写 URL（jdbc:oracle:thin:@别名）。会话设置写在启动脚本中（ALTER SESSION SET …）。",
+  "Service name:": "服务名：",
+  "Oracle": "Oracle"
 }
