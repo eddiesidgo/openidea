@@ -653,6 +653,14 @@ export interface NotificationService {
   expire?(key: string): void;
 }
 
+/** The coding agents (Agents tool window), for features that want an agent's answer. */
+export interface AgentService {
+  /** The agent in use: that of the conversation worked in last, else the one new tasks start with. */
+  current(): { id: string; name: string } | null;
+  /** Asks agent `provider` one question; no task is kept. Rejects when `signal` aborts. */
+  ask(provider: string, question: string, signal?: AbortSignal): Promise<string>;
+}
+
 /** A terminal widget (xterm) embedded in another view, e.g. a Run console emulating a terminal. */
 export interface EmbeddedTerminal {
   write(data: string): void;
@@ -696,6 +704,7 @@ const services: {
   notifications?: NotificationService;
   embeddedTerminal?: EmbeddedTerminalFactory;
   runOutput?: RunOutputService;
+  agents?: AgentService;
 } = {};
 
 function need<T>(s: T | undefined, name: string): T {
@@ -708,6 +717,9 @@ export const provideToolWindowService = (s: ToolWindowService) => void (services
 export const provideNotificationService = (s: NotificationService) => void (services.notifications = s);
 export const provideEmbeddedTerminal = (f: EmbeddedTerminalFactory | undefined) => void (services.embeddedTerminal = f);
 export const provideRunOutput = (s: RunOutputService | undefined) => void (services.runOutput = s);
+export const provideAgentService = (s: AgentService | undefined) => void (services.agents = s);
+/** `undefined` while the Agents feature is not active. */
+export const maybeAgentService = (): AgentService | undefined => services.agents;
 
 export const editorService = (): EditorService => need(services.editor, "editor");
 export const toolWindowService = (): ToolWindowService => need(services.toolWindows, "toolWindows");

@@ -257,6 +257,22 @@ pub fn unarchive(host: &Host, window: &str, task: String) -> IdeResult<()> {
     host.project(window)?.agents.unarchive(&task)
 }
 
+/// Asks `provider` one question in a throwaway session and returns its answer.
+pub async fn ask(
+    host: &Host,
+    window: &str,
+    provider: String,
+    question: String,
+    request: RequestId,
+) -> IdeResult<String> {
+    host.require_trust(window)?;
+    let agents = host.project(window)?.agents.clone();
+    let cancel = host.begin_request(request);
+    let result = agents.ask(&provider, &question, cancel).await;
+    host.end_request(request);
+    result
+}
+
 pub fn rename(host: &Host, window: &str, task: String, title: String) -> IdeResult<()> {
     host.project(window)?.agents.rename(&task, &title)
 }
@@ -315,6 +331,9 @@ pub(crate) fn register(d: &mut Dispatcher) {
     d.add("agent_unarchive", |c| async move { unarchive(&c.host, &c.window, c.arg("task")?) });
     d.add("agent_rename", |c| async move { rename(&c.host, &c.window, c.arg("task")?, c.arg("title")?) });
     d.add("agent_archive", |c| async move { archive(&c.host, &c.window, c.arg("task")?) });
+    d.add("agent_ask", |c| async move {
+        ask(&c.host, &c.window, c.arg("provider")?, c.arg("question")?, c.arg("request")?).await
+    });
     d.add(
         "agent_delete",
         |c| async move { delete(&c.host, &c.window, c.arg("task")?, c.arg("removeWorktree")?).await },

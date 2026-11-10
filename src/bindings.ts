@@ -180,8 +180,13 @@ export const commands = {
 	/**  Answers a permission request; `option: null` cancels it. */
 	agentRespond: (task: string, permission: number, option: string | null) => typedError<null, IdeError>(__TAURI_INVOKE("agent_respond", { task, permission, option })),
 	agentArchive: (task: string) => typedError<null, IdeError>(__TAURI_INVOKE("agent_archive", { task })),
-	agentUnarchive: (task: string) => typedError<null, IdeError>(__TAURI_INVOKE("agent_unarchive", { task })),
 	agentRename: (task: string, title: string) => typedError<null, IdeError>(__TAURI_INVOKE("agent_rename", { task, title })),
+	/**
+	 *  Asks agent `provider` one question in a throwaway session (no task is kept) and returns
+	 *  its answer. Cancel with `cancel_request(request)`.
+	 */
+	agentAsk: (provider: string, question: string, request: RequestId) => typedError<string, IdeError>(__TAURI_INVOKE("agent_ask", { provider, question, request })),
+	agentUnarchive: (task: string) => typedError<null, IdeError>(__TAURI_INVOKE("agent_unarchive", { task })),
 	agentDelete: (task: string, removeWorktree: boolean) => typedError<null, IdeError>(__TAURI_INVOKE("agent_delete", { task, removeWorktree })),
 	agentChanges: (task: string) => typedError<AgentChange[], IdeError>(__TAURI_INVOKE("agent_changes", { task })),
 	/**  Content of `path` when the task started (left side of its diff). */
@@ -1529,6 +1534,16 @@ export type ActiveTheme = {
 	theme: ThemeDef,
 };
 
+/**  The account an agent is signed in to, as the agent reports it. */
+export type AgentAccount = {
+	email: string | null,
+	organization: string | null,
+	/**  The plan ("Claude Pro", "Claude Max"…). */
+	subscription: string | null,
+	/**  Who serves the requests: `firstParty` (Anthropic), `bedrock`, `vertex`, `foundry`… */
+	apiProvider: string | null,
+};
+
 /**  A task the agent runs in the background while the conversation goes on. */
 export type AgentBackgroundTask = {
 	id: string,
@@ -1676,6 +1691,8 @@ export type AgentEvent =
 { type: "append"; task: string; subagent: string | null; index: number; from: number; text: string } | 
 /**  An agent reported the usage limits of its account (shared by every task of `provider`). */
 { type: "limits"; provider: string; limits: AgentLimit[] } | 
+/**  An agent reported the account it is signed in to (shared by every task of `provider`). */
+{ type: "account"; provider: string; account: AgentAccount } | 
 /**  The installed or configured agent providers changed. */
 { type: "providers" };
 

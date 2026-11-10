@@ -15,6 +15,7 @@ import {
   registerMenuGroup,
   registerSettingsPage,
   registerStatusItem,
+  provideAgentService,
   registerToolWindow,
   toolWindowService,
 } from "@/workbench/contributions";
@@ -26,6 +27,7 @@ import { connect, disconnect, openHome, useAgents } from "./store";
 import { TaskStatusMark } from "./TaskStatusMark";
 import { taskActions, useAgentsHeaderMenu } from "./taskActions";
 import { replyActions } from "./replyActions";
+import { agentService } from "./agentService";
 
 /** Settings › Agents › Coding Agents (also used by the Settings window). */
 export function activateSettingsPages(): () => void {
@@ -182,7 +184,9 @@ export function activate(): () => void {
       },
     ]),
   ];
+  provideAgentService(agentService);
   return () => {
+    provideAgentService(undefined);
     disposers.reverse().forEach((d) => d());
     disconnect();
   };

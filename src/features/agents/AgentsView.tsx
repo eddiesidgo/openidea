@@ -245,6 +245,9 @@ export function AgentsView() {
                 className={styles.dockedTitle}
                 title={dockedTitle ?? undefined}
                 onPointerDown={(e) => docked && dragTask(e, docked)}
+                onDoubleClick={() => {
+                  if (docked) void executeAction("agents.renameTask", docked);
+                }}
               >
                 {homeOpen ? <T>New Agent Task</T> : dockedTitle}
               </span>

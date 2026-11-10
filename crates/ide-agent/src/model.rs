@@ -209,6 +209,18 @@ pub struct AgentLimit {
     pub resets_ms: Option<f64>,
 }
 
+/// The account an agent is signed in to, as the agent reports it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccount {
+    pub email: Option<String>,
+    pub organization: Option<String>,
+    /// The plan ("Claude Pro", "Claude Max"…).
+    pub subscription: Option<String>,
+    /// Who serves the requests: `firstParty` (Anthropic), `bedrock`, `vertex`, `foundry`…
+    pub api_provider: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentImage {
@@ -531,6 +543,11 @@ pub enum AgentEvent {
     Limits {
         provider: String,
         limits: Vec<AgentLimit>,
+    },
+    /// An agent reported the account it is signed in to (shared by every task of `provider`).
+    Account {
+        provider: String,
+        account: AgentAccount,
     },
     /// The installed or configured agent providers changed.
     Providers,

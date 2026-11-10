@@ -2,8 +2,8 @@
 //! the agent reports them over ACP.
 
 use crate::model::{
-    AgentCommand, AgentCommandSource, AgentConfigOption, AgentConfigValue, AgentConfigVia, AgentCost, AgentLimit,
-    AgentUsage,
+    AgentAccount, AgentCommand, AgentCommandSource, AgentConfigOption, AgentConfigValue, AgentConfigVia, AgentCost,
+    AgentLimit, AgentUsage,
 };
 use serde_json::{Value, json};
 
@@ -193,6 +193,20 @@ pub(crate) fn limits_of(update: &Value) -> Vec<AgentLimit> {
             })
         })
         .collect()
+}
+
+/// The account an [`crate::ACCOUNT_UPDATE`] carries (Claude Code's `initialize` `account`);
+/// `None` when it names nothing.
+pub(crate) fn account_of(update: &Value) -> Option<AgentAccount> {
+    let a = update.get("account")?;
+    let text = |k: &str| a.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let account = AgentAccount {
+        email: text("email"),
+        organization: text("organization"),
+        subscription: text("subscriptionType"),
+        api_provider: text("apiProvider"),
+    };
+    (account != AgentAccount::default()).then_some(account)
 }
 
 fn legacy(

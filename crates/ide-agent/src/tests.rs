@@ -896,6 +896,30 @@ async fn a_task_runs_asks_for_permission_and_survives_a_restart() {
             AgentEvent::Entry { index: 0, entry: AgentEntry::User { sent_ms: Some(_), done_ms: Some(_), .. }, .. }
         )));
     }
+    mgr.task(&task.id).unwrap().on_update(
+        None,
+        &json!({ "sessionUpdate": ACCOUNT_UPDATE, "account": { "email": "a@b.c", "subscriptionType": "Claude Pro" } }),
+    );
+    {
+        let events = events.lock();
+        let account = events.iter().rev().find_map(|e| match e {
+            AgentEvent::Account { provider, account } => Some((provider.clone(), account.clone())),
+            _ => None,
+        });
+        assert_eq!(
+            account,
+            Some((
+                task.provider.clone(),
+                AgentAccount {
+                    email: Some("a@b.c".into()),
+                    subscription: Some("Claude Pro".into()),
+                    ..AgentAccount::default()
+                }
+            )),
+            "an agent's account is its provider's"
+        );
+    }
+
     let providers = mgr.providers();
     let claude = providers.iter().find(|p| p.id == "claude").unwrap();
     assert_eq!(claude.config.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["model", "mode"]);
@@ -1731,6 +1755,39 @@ fn retry_updates_become_a_countdown() {
     assert_eq!(retry_of(&json!({"sessionUpdate": RETRY_UPDATE}), 0.0), None, "no attempt");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_one_off_question_returns_the_reply_and_keeps_no_task() {
+    let tmp = tempfile::tempdir().unwrap();
+    let agent = Arc::new(FakeAgent::default());
+    let mgr = manager(tmp.path(), agent.clone());
+    let reply = mgr.ask("claude", "again", ide_core::CancellationToken::new()).await.unwrap();
+    assert_eq!(reply, "second turn");
+    assert!(mgr.subscribe(Arc::new(|_| {})).is_empty(), "no task is kept");
+    assert!(agent.calls.lock().iter().any(|c| c.starts_with("session/new")));
+    assert!(mgr.ask("nope", "again", ide_core::CancellationToken::new()).await.is_err(), "unknown agent");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "drives the real claude CLI (signed in)"]
+async fn live_one_off_question_to_claude() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = AgentPaths {
+        project_root: tmp.path().to_path_buf(),
+        store_dir: tmp.path().join("tasks"),
+        worktrees_dir: tmp.path().join("worktrees"),
+        models_file: tmp.path().join("models.json"),
+        custom_agents_dir: None,
+        home_dir: None,
+    };
+    let mgr = AgentManager::new(paths, tokio::runtime::Handle::current());
+    let reply = mgr
+        .ask("claude", "Reply with the single word pong and nothing else.", ide_core::CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(reply.trim().trim_end_matches('.').to_lowercase(), "pong");
+    assert!(mgr.subscribe(Arc::new(|_| {})).is_empty(), "no task is kept");
+}
+
 #[test]
 fn usage_limits_and_cost_skip_what_is_malformed() {
     let limits = config::limits_of(&json!({"sessionUpdate": LIMITS_UPDATE, "limits": [
@@ -1739,6 +1796,15 @@ fn usage_limits_and_cost_skip_what_is_malformed() {
         {"window": "five_hour"},
     ]}));
     assert_eq!(limits, [AgentLimit { window: "seven_day".into(), used_percent: 100.0, resets_ms: None }]);
+    assert_eq!(config::account_of(&json!({"account": {"email": " ", "apiProvider": ""}})), None);
+    assert_eq!(
+        config::account_of(&json!({"account": {"organization": "Acme", "apiProvider": "firstParty"}})),
+        Some(AgentAccount {
+            organization: Some("Acme".into()),
+            api_provider: Some("firstParty".into()),
+            ..AgentAccount::default()
+        })
+    );
     let usage = config::usage_of(&json!({"used": 1, "size": 2, "cost": {"amount": -1.0, "currency": "USD"}}));
     assert_eq!(usage.map(|u| u.cost), Some(None), "a negative cost is dropped, the context use kept");
 }

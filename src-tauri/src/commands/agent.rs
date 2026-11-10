@@ -262,6 +262,20 @@ pub fn agent_unarchive(window: Window, state: State<'_, AppState>, task: String)
     agent::unarchive(&state.host, window.label(), task)
 }
 
+/// Asks agent `provider` one question in a throwaway session (no task is kept) and returns
+/// its answer. Cancel with `cancel_request(request)`.
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_ask(
+    window: Window,
+    state: State<'_, AppState>,
+    provider: String,
+    question: String,
+    request: RequestId,
+) -> IdeResult<String> {
+    agent::ask(&state.host, window.label(), provider, question, request).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn agent_rename(window: Window, state: State<'_, AppState>, task: String, title: String) -> IdeResult<()> {

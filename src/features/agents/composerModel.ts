@@ -17,6 +17,8 @@ export interface FileRef {
   path: string;
   /** As written after `@`. */
   rel: string;
+  /** Attached with the paperclip: sent whether or not the text mentions it. */
+  attached?: boolean;
 }
 
 export interface ComposerDraft {
@@ -142,19 +144,33 @@ export function mentionOf(rel: string, lines?: { from: number; to: number }): st
   return lines.from === lines.to ? `@${rel}:${lines.from}` : `@${rel}:${lines.from}-${lines.to}`;
 }
 
-/** The prompt to send: files still mentioned in the text (each once), and the images. */
+/** Whether the text still mentions the file (`@rel`, or `@rel:lines`). */
+export function isMentioned(text: string, rel: string): boolean {
+  return new RegExp(`@${escapeRe(rel)}(?![\\w./-])|@${escapeRe(rel)}:`).test(text);
+}
+
+/** The prompt to send: attached files and files still mentioned in the text (each once), and the images. */
 export function toPrompt(draft: ComposerDraft): AgentPrompt {
   const seen = new Set<string>();
   const files = draft.files.filter((f) => {
-    if (seen.has(f.path) || !new RegExp(`@${escapeRe(f.rel)}(?![\\w./-])|@${escapeRe(f.rel)}:`).test(draft.text))
-      return false;
+    if (seen.has(f.path) || !(f.attached || isMentioned(draft.text, f.rel))) return false;
     seen.add(f.path);
     return true;
   });
   return { text: draft.text.trim(), files: files.map((f) => f.path), images: draft.images };
 }
 
-export const canSend = (d: ComposerDraft) => !!d.text.trim() || d.images.length > 0;
+/** Files attached with the paperclip, each once. */
+export function attachedFiles(draft: ComposerDraft): FileRef[] {
+  const seen = new Set<string>();
+  return draft.files.filter((f) => {
+    if (!f.attached || seen.has(f.path)) return false;
+    seen.add(f.path);
+    return true;
+  });
+}
+
+export const canSend = (d: ComposerDraft) => !!d.text.trim() || d.images.length > 0 || d.files.some((f) => f.attached);
 
 /**
  * ↑ / ↓ through sent messages (newest first). `index` −1 is the unsent draft. Returns the
@@ -240,6 +256,12 @@ const LIMIT_WINDOWS: Record<string, { short: string; name: string }> = {
   seven_day_opus: { short: "7d Opus", name: "Weekly Opus limit" },
   seven_day_sonnet: { short: "7d Sonnet", name: "Weekly Sonnet limit" },
 };
+
+/** A usage-limit window's name: "5-hour limit", "Weekly limit"… (the agent's own id for others). */
+export function limitName(window: string): string {
+  const known = LIMIT_WINDOWS[window];
+  return known ? tx(known.name) : window;
+}
 
 /** "5h 19%" for a usage-limit window, and a tooltip saying when it resets. */
 export function limitLabel(l: AgentLimit, now: number): { short: string; percent: number; detail: string } {

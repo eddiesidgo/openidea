@@ -7,7 +7,7 @@ use crate::conn::{Cells, Fetched, ResultColumn, Setup, bytes_text, hex};
 use crate::source::{DataSource, DbDriver, DbTxMode};
 use bb8::ManageConnection;
 use ide_core::{CancellationToken, IdeError, IdeResult, error::ErrorKind};
-use oracledb::{DbType, Lob, OracleIntervalDS, OracleIntervalYM, OracleTimestamp};
+use oracledb::{DbType, JsonValue, Lob, OracleIntervalDS, OracleIntervalYM, OracleTimestamp};
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -493,6 +493,14 @@ fn cell(row: &mut oracledb::Row, i: usize, ty: &DbType, mode: Cells) -> Option<S
     {
         return row.get::<Option<OracleTimestamp>>(i).ok()?.map(|v| timestamp(&v));
     }
+    // Oracle 21c's native JSON (OSON): no text conversion of its own, read as SQL NULL otherwise.
+    if ty == oracledb::DB_TYPE_JSON {
+        return row.get::<Option<JsonValue>>(i).ok()?.map(|v| {
+            let mut text = String::new();
+            json_text(&mut text, &v);
+            text
+        });
+    }
     if let Ok(value) = row.get::<Option<String>>(i) {
         return value;
     }
@@ -517,6 +525,50 @@ fn cell(row: &mut oracledb::Row, i: usize, ty: &DbType, mode: Cells) -> Option<S
     // The remaining types (objects, REF cursors…) show as SQL NULL in the grid,
     // exactly as the previous driver rendered them.
     None
+}
+
+/// A native JSON value as compact JSON text. Object members come sorted by name: the driver
+/// keeps them in a hash map, so their stored order is lost. Values JSON has no type for
+/// (timestamps, intervals, raw bytes, vectors) are written as strings.
+fn json_text(out: &mut String, v: &JsonValue) {
+    let string = |out: &mut String, s: &str| out.push_str(&serde_json::Value::from(s).to_string());
+    match v {
+        JsonValue::Null => out.push_str("null"),
+        JsonValue::Boolean(b) => out.push_str(if *b { "true" } else { "false" }),
+        JsonValue::Number(n) => out.push_str(&n.to_string()),
+        JsonValue::BinaryDouble(f) => out.push_str(&serde_json::Value::from(*f).to_string()),
+        JsonValue::BinaryFloat(f) => out.push_str(&serde_json::Value::from(f64::from(*f)).to_string()),
+        JsonValue::String(s) => string(out, s),
+        JsonValue::Timestamp(t) => string(out, &timestamp(t)),
+        JsonValue::IntervalDS(d) => string(out, &d.to_string()),
+        JsonValue::IntervalYM(d) => string(out, &d.to_string()),
+        JsonValue::Raw(b) | JsonValue::JsonId(b) => string(out, &hex(b)),
+        JsonValue::Vector(v) => string(out, &format!("{v:?}")),
+        JsonValue::JsonArray(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                json_text(out, item);
+            }
+            out.push(']');
+        }
+        JsonValue::JsonObject(members) => {
+            let mut names: Vec<&String> = members.keys().collect();
+            names.sort();
+            out.push('{');
+            for (i, name) in names.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                string(out, name);
+                out.push(':');
+                json_text(out, &members[name]);
+            }
+            out.push('}');
+        }
+    }
 }
 
 /// Reads a character LOB prefix. CLOB offsets are UTF-16 units, so reading
@@ -759,6 +811,26 @@ mod tests {
     /// ```text
     /// OPENIDEA_ORACLE_TEST=… cargo nextest run -p ide-db a_pooled_connection_runs_queries --no-capture
     /// ```
+    /// Oracle 21c's native JSON type (live server, as `a_pooled_connection_runs_queries`).
+    #[tokio::test]
+    async fn json_columns_read_as_text() {
+        let Some(spec) = std::env::var("OPENIDEA_ORACLE_TEST").ok().filter(|s| !s.is_empty()) else { return };
+        let (source, password) = live_source(&spec);
+        let pool = crate::conn::Pool::connect(&source, Some(&password), None).await.expect("connect");
+        let sql = "SELECT JSON('{\"b\": \"x\", \"a\": [1, true, null], \"c\": {\"d\": 1.5}}') doc, 7 n FROM DUAL UNION ALL SELECT NULL, 8 FROM DUAL";
+        let result = pool.execute_from(sql, 0, 10, &CancellationToken::new()).await;
+        let result = result.unwrap_or_else(|e| panic!("{}", e.message));
+        let types: Vec<_> = result.columns.iter().map(|c| (c.name.as_str(), c.type_name.as_str())).collect();
+        assert_eq!(types, [("DOC", "DB_TYPE_JSON"), ("N", "DB_TYPE_NUMBER")]);
+        assert_eq!(
+            result.rows,
+            [
+                [Some(r#"{"a":[1,true,null],"b":"x","c":{"d":1.5}}"#.to_owned()), Some("7".to_owned())],
+                [None, Some("8".to_owned())],
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn a_pooled_connection_runs_queries() {
         let Some(spec) = std::env::var("OPENIDEA_ORACLE_TEST").ok().filter(|s| !s.is_empty()) else { return };

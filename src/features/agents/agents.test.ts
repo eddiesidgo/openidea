@@ -3,9 +3,11 @@ import type { AgentConfigOption, AgentEntry, AgentStatus, AgentTask } from "@/bi
 import {
   applyCompletion,
   atEdgeLine,
+  attachedFiles,
   bypassDefaults,
   canSend,
   completionAt,
+  isMentioned,
   isPathQuery,
   resolveTyped,
   imageFromDataUrl,
@@ -184,6 +186,17 @@ describe("agent composer", () => {
     expect(toPrompt({ text: "explain @src/", files: [folder], images: [] }).files).toEqual(["/w/src"]);
     expect(toPrompt({ text: "explain @src/a.rs", files: [folder], images: [] }).files).toEqual([]);
     expect(canSend({ text: " ", files: [], images: [] })).toBe(false);
+  });
+
+  it("sends attached files whether or not the text mentions them", () => {
+    const pdf = { path: "C:\\docs\\spec.pdf", rel: "C:\\docs\\spec.pdf", attached: true };
+    const draft = { text: "", files: [pdf, pdf, { path: "/w/a.rs", rel: "a.rs" }], images: [] };
+    expect(toPrompt(draft)).toEqual({ text: "", files: ["C:\\docs\\spec.pdf"], images: [] });
+    expect(attachedFiles(draft)).toEqual([pdf]);
+    expect(canSend(draft)).toBe(true);
+    expect(canSend({ text: "", files: [{ path: "/w/a.rs", rel: "a.rs" }], images: [] })).toBe(false);
+    expect(isMentioned("see @a.rs:2", "a.rs")).toBe(true);
+    expect(isMentioned("see @a.rsx", "a.rs")).toBe(false);
   });
 
   it("recalls history from the edge lines only", () => {

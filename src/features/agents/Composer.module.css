@@ -58,6 +58,9 @@
   font-size: var(--fs-ui);
   line-height: 1.5;
   padding: 10px 12px 2px;
+  /* Text wraps, long paths and URLs too: there is never anything to scroll sideways to
+     (WebKitGTK otherwise shows a horizontal scrollbar next to the vertical one). */
+  overflow-x: hidden;
   overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
@@ -395,6 +398,53 @@
 .image:hover .removeImage,
 .removeImage:focus-visible {
   opacity: 1;
+}
+/* Files attached with the paperclip. */
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 10px 0;
+  cursor: default;
+}
+.images + .files {
+  padding-top: 6px;
+}
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--fg);
+  font-size: var(--fs-small);
+}
+.fileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.removeFile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.removeFile:hover,
+.removeFile:focus-visible {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 /* `@` / `/` completion; Popup keeps the list within the viewport. */

@@ -57,10 +57,14 @@ pub(crate) const LIMITS_UPDATE: &str = "openidea_limits";
 /// A native agent's own update: the background tasks its session runs
 /// (see [`TaskState::background_tasks`]).
 pub(crate) const BACKGROUND_TASKS_UPDATE: &str = "openidea_background_tasks";
+/// A native agent's own update: the account it is signed in to (see [`AgentAccount`]).
+pub(crate) const ACCOUNT_UPDATE: &str = "openidea_account";
 /// Referenced files up to this size are embedded in the prompt (when the agent takes it).
 const MAX_EMBED: u64 = 256 * 1024;
 /// How long a probe waits for the agent to answer `initialize`.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a one-off question ([`AgentManager::ask`]) may take, starting the agent included.
+const ASK_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long deleting a task waits for its agent to exit before removing the worktree.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
 
@@ -954,6 +958,53 @@ impl AgentManager {
         Ok(probe)
     }
 
+    /// Asks `provider` one question in a throwaway session in the project and returns its answer
+    /// (the text of its reply). No task is kept, and the agent may not use tools that need
+    /// permission: the question has to carry what the agent needs.
+    pub async fn ask(&self, provider: &str, question: &str, cancel: ide_core::CancellationToken) -> IdeResult<String> {
+        let cwd = self.shared.paths.project_root.as_path();
+        let spec = self.shared.spec(provider).ok_or_else(|| IdeError::invalid(format!("unknown agent {provider}")))?;
+        let stderr: Arc<Mutex<Vec<String>>> = Arc::default();
+        let lines = stderr.clone();
+        let on_stderr: Box<dyn Fn(String) + Send + Sync> = Box::new(move |l| lines.lock().push(l));
+        let answer = Arc::new(OneOff::default());
+        let client = acp::Dialect::wrap(answer.clone());
+        let peer = (self.shared.connector)(&spec, cwd, client.clone(), on_stderr)
+            .map(|peer| acp::Conn::new(peer, client))
+            .map_err(|e| IdeError::unavailable(format!("Couldn't start {} (`{}`): {e}", spec.name, spec.command)))?;
+        let turn = async {
+            peer.initialize(&client_info()).await?;
+            let cwd = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_owned()).to_string_lossy().into_owned();
+            let session: Value = peer.request("session/new", json!({ "cwd": cwd, "mcpServers": [] }), None).await?;
+            let id = session.get("sessionId").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let prompt = json!({ "sessionId": id, "prompt": [{ "type": "text", "text": question }] });
+            peer.request::<_, Value>("session/prompt", prompt, Some(cancel.clone())).await
+        };
+        let result = tokio::select! {
+            r = tokio::time::timeout(ASK_TIMEOUT, turn) => r,
+            () = cancel.cancelled() => {
+                peer.kill();
+                return Err(IdeError::cancelled());
+            }
+        };
+        peer.kill();
+        let failed = |e: String| match stderr.lock().last() {
+            Some(line) => IdeError::unavailable(format!("{}: {e}: {line}", spec.name)),
+            None => IdeError::unavailable(format!("{}: {e}", spec.name)),
+        };
+        match result {
+            Err(_) => Err(failed("the agent did not answer in time".into())),
+            Ok(Err(e)) => Err(failed(e.to_string())),
+            Ok(Ok(reply)) if reply.get("stopReason").and_then(Value::as_str) == Some("cancelled") => {
+                Err(IdeError::cancelled())
+            }
+            Ok(Ok(_)) => {
+                let text = answer.text.lock().trim().to_owned();
+                if text.is_empty() { Err(failed("the agent gave no answer".into())) } else { Ok(text) }
+            }
+        }
+    }
+
     /// Stops the current turn (`session/cancel`); pending permission requests are cancelled.
     /// Queued messages stay queued. With `subagent`, stops only that subagent's work.
     pub fn cancel(&self, id: &str, subagent: Option<String>) -> IdeResult<()> {
@@ -1760,6 +1811,13 @@ impl Task {
             }
             return;
         }
+        if kind == ACCOUNT_UPDATE {
+            if let Some(account) = config::account_of(update) {
+                let provider = self.state.lock().task.provider.clone();
+                self.shared.emit(AgentEvent::Account { provider, account });
+            }
+            return;
+        }
         if kind == "session_info_update" {
             // The agent's own title for the session replaces the first line of the prompt,
             // unless the user named the task.
@@ -2003,6 +2061,31 @@ impl Task {
 /// Answers the agent's requests on behalf of one task.
 struct Client {
     task: Weak<Task>,
+}
+
+/// The client side of a one-off question: collects the reply and refuses tool permissions.
+#[derive(Default)]
+struct OneOff {
+    text: Mutex<String>,
+}
+
+impl Handler for OneOff {
+    fn on_notification(&self, method: &str, params: Value) {
+        let update = params.get("update");
+        if method == "session/update"
+            && update.and_then(|u| u.get("sessionUpdate")).and_then(Value::as_str) == Some("agent_message_chunk")
+            && let Some(text) = update.and_then(|u| u.pointer("/content/text")).and_then(Value::as_str)
+        {
+            self.text.lock().push_str(text);
+        }
+    }
+
+    fn on_request(&self, method: &str, _params: Value) -> Result<Value, (i64, String)> {
+        match method {
+            "session/request_permission" => Ok(json!({ "outcome": { "outcome": "cancelled" } })),
+            _ => Err((codes::METHOD_NOT_FOUND, format!("unsupported method {method}"))),
+        }
+    }
 }
 
 impl Handler for Client {

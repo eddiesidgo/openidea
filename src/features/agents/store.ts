@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import type {
+  AgentAccount,
   AgentChange,
   AgentCommand,
   AgentConfigOption,
@@ -20,7 +21,15 @@ import { call, commands, isTauri } from "@/platform/ipc";
 import { editorService, notifications, notifyTabTitlesChanged, toolWindowService } from "@/workbench/contributions";
 import { tx } from "@/platform/i18n";
 import { confirm } from "@/workbench/messages";
-import { bypassDefaults, canSend, emptyDraft, toPrompt, type ComposerDraft, type FileRef } from "./composerModel";
+import {
+  bypassDefaults,
+  canSend,
+  emptyDraft,
+  isMentioned,
+  toPrompt,
+  type ComposerDraft,
+  type FileRef,
+} from "./composerModel";
 import { withQuote } from "./conversation";
 import {
   HOME_KEY,
@@ -71,6 +80,8 @@ interface AgentsState {
   providers: AgentProvider[];
   /** The usage limits each agent last reported for its account, by provider. */
   limits: Map<string, AgentLimit[]>;
+  /** The account each agent last reported being signed in to, by provider. */
+  accounts: Map<string, AgentAccount>;
   draft: Draft;
   composers: Map<string, ComposerDraft>;
   /** The composer typed in last: where "Send to Agent" adds references. */
@@ -134,6 +145,7 @@ export const useAgents = create<AgentsState>(() => ({
   changes: new Map(),
   providers: [],
   limits: new Map(),
+  accounts: new Map(),
   draft: savedDraft(load<Partial<Draft>>(DRAFT_KEY, {})),
   composers: new Map(),
   lastComposer: HOME,
@@ -411,6 +423,10 @@ function onEvent(e: AgentEvent) {
       useAgents.setState({
         limits: new Map(s.limits).set(e.provider, e.limits),
       });
+      break;
+    }
+    case "account": {
+      useAgents.setState({ accounts: new Map(s.accounts).set(e.provider, e.account) });
       break;
     }
     case "entry": {
@@ -825,10 +841,11 @@ export async function editQueued(task: string, queued: string): Promise<void> {
   const item = await call(commands.agentUnqueue(task, queued));
   const current = composerDraft(task);
   const cwd = useAgents.getState().tasks.get(task)?.cwd ?? "";
-  const files: FileRef[] = item.prompt.files.map((path) => ({
-    path,
-    rel: path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path,
-  }));
+  const files: FileRef[] = item.prompt.files.map((path) => {
+    const rel = path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
+    // Files the text does not mention were attached with the paperclip.
+    return { path, rel, attached: !isMentioned(item.prompt.text, rel) };
+  });
   updateComposer(task, {
     text: current.text ? `${item.prompt.text}\n${current.text}` : item.prompt.text,
     files: [...files, ...current.files],

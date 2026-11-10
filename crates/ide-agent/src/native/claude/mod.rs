@@ -177,6 +177,8 @@ struct State {
     cancel_at: Option<Instant>,
     /// When the usage limit the CLI last reported as reached resets.
     limit_resets_ms: Option<f64>,
+    /// Who the CLI is signed in as (its `initialize` response's `account`), `Null` until known.
+    account: Value,
     terminal_only: Vec<String>,
     titled: bool,
 }
@@ -351,6 +353,7 @@ impl Shim {
                 turn: None,
                 cancel_at: None,
                 limit_resets_ms: None,
+                account: Value::Null,
                 terminal_only: Vec::new(),
                 titled: false,
             }),
@@ -707,6 +710,7 @@ impl Session {
         let chosen = {
             let mut st = self.st.lock();
             st.settings = Settings::from_cli(&init, &applied);
+            st.account = init.get("account").cloned().unwrap_or_default();
             st.proc = Some(proc.clone());
             st.start = start;
             st.chosen.clone()
@@ -756,12 +760,22 @@ impl Session {
         // After the response that makes the session known.
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
-            let commands = me.st.lock().settings.commands.clone();
+            let (commands, account) = {
+                let st = me.st.lock();
+                (st.settings.commands.clone(), st.account.clone())
+            };
             if let Some(shim) = me.shim() {
-                shim.notify(vec![Update {
+                let mut updates = vec![Update {
                     session: me.id.clone(),
                     update: json!({ "sessionUpdate": "available_commands_update", "availableCommands": commands }),
-                }]);
+                }];
+                if account.is_object() {
+                    updates.push(Update {
+                        session: me.id.clone(),
+                        update: json!({ "sessionUpdate": crate::ACCOUNT_UPDATE, "account": account }),
+                    });
+                }
+                shim.notify(updates);
             }
         });
     }

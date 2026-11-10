@@ -43,7 +43,13 @@ import {
   type TreeHandle,
   T,
 } from "@/ui";
-import { editorService, maybeEditorService, type EditorInput, useMenuSlotItems } from "@/workbench/contributions";
+import {
+  editorService,
+  maybeEditorService,
+  notifications,
+  type EditorInput,
+  useMenuSlotItems,
+} from "@/workbench/contributions";
 import { evaluateWhen, useContextKeys } from "@/platform/context";
 import { useToolWindowLayout } from "@/workbench/toolwindows/store";
 import {
@@ -90,7 +96,8 @@ import {
 } from "./diffInput";
 import { DiffEditor } from "./DiffEditor";
 import { KIND_COLOR, KIND_LABEL, fileCount, formatTime, stashLabel, stripSlash } from "./model";
-import { call, commands } from "@/platform/ipc";
+import { call, commands, isCancelled } from "@/platform/ipc";
+import { commitMessageAgent, generateCommitMessage } from "./aiCommitMessage";
 import type { FileStatus } from "@/bindings";
 import { OperationBanner } from "./operations";
 import { runOp } from "./ops";
@@ -1008,6 +1015,7 @@ export function CommitMessageField({ included, runner }: { included: number; run
           aria-expanded={historyOpen}
           onClick={() => setHistoryOpen((o) => !o)}
         />
+        <GenerateMessageButton included={included} onGenerated={() => ref.current?.focus()} />
         <Menu
           open={historyOpen}
           onClose={() => setHistoryOpen(false)}
@@ -1104,6 +1112,64 @@ function CommitMessageActions() {
           <IconButton key={i.action} icon={i.icon ?? "plugin"} action={i.action} actionArg={i.arg} size="small" />
         ))}
     </>
+  );
+}
+
+/**
+ * Generate Commit Message: the agent in use writes the message for the included changes;
+ * clicked again while it works, it stops.
+ */
+function GenerateMessageButton({ included, onGenerated }: { included: number; onGenerated: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const running = useRef<AbortController | null>(null);
+  // Read at each render: the agents load after the Commit tool window opens.
+  const agent = commitMessageAgent();
+  useEffect(() => () => running.current?.abort(), []);
+  const generate = async () => {
+    if (running.current) {
+      running.current.abort();
+      running.current = null;
+      setBusy(false);
+      return;
+    }
+    const controller = new AbortController();
+    running.current = controller;
+    setBusy(true);
+    try {
+      const message = await generateCommitMessage(controller.signal);
+      if (controller.signal.aborted) return;
+      useCommit.setState({ message });
+      onGenerated();
+    } catch (e) {
+      if (!controller.signal.aborted && !isCancelled(e)) {
+        notifications().notify({
+          group: "vcs",
+          level: "warning",
+          title: "Couldn't generate the commit message",
+          body: e instanceof Error ? e.message : String(e),
+        });
+      }
+    } finally {
+      if (running.current === controller) {
+        running.current = null;
+        setBusy(false);
+      }
+    }
+  };
+  return (
+    <IconButton
+      icon={busy ? "stop" : "sparkle"}
+      title={
+        busy
+          ? tx("Stop Generating the Commit Message")
+          : agent
+            ? tx`Generate Commit Message with ${agent.name}`
+            : tx("Generate Commit Message with AI")
+      }
+      size="small"
+      disabled={!busy && included === 0}
+      onClick={() => void generate()}
+    />
   );
 }
 

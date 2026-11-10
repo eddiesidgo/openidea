@@ -1,6 +1,7 @@
 /**
  * The message box of the New Task page and of sessions: `@` file and folder references
- * (project index search), `/` agent commands, ↑ / ↓ history, pasted or dropped images, Shift+Tab to cycle
+ * (project index search), `/` agent commands, ↑ / ↓ history, pasted or dropped images, files
+ * attached with the paperclip (any kind: the agent reads them), Shift+Tab to cycle
  * the agent's mode. Its draft lives in the store under `id`.
  */
 import {
@@ -39,6 +40,7 @@ import {
   MAX_IMAGE_BYTES,
   applyCompletion,
   atEdgeLine,
+  attachedFiles,
   isPathQuery,
   mergeMatches,
   resolveTyped,
@@ -56,6 +58,7 @@ import {
 } from "./composerModel";
 import { composerDraft, updateComposer, useAgents } from "./store";
 import { ImagePreview, imageSrc } from "./ImagePreview";
+import { AccountUsageButton } from "./AccountUsage";
 import { useCompletionAnchor } from "./useCompletionAnchor";
 import { useAgentSettings } from "./agentSettings";
 import styles from "./Composer.module.css";
@@ -70,6 +73,9 @@ type Item =
   | { kind: "section"; source: "command" | "skill" };
 
 const isSection = (item: Item) => item.kind === "section";
+
+/** The last segment of a path, `/` or `\` separated (file dialogs give Windows paths). */
+const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1) || path;
 
 export interface ComposerProps {
   /** Store key of the draft. */
@@ -126,6 +132,7 @@ export function Composer(props: ComposerProps) {
   const text = draft?.text ?? "";
   const images = draft?.images ?? [];
   const tokens = useMemo(() => messageTokens(text), [text]);
+  const attached = draft ? attachedFiles(draft) : [];
   const [preview, setPreview] = useState<AgentImage | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
@@ -157,6 +164,9 @@ export function Composer(props: ComposerProps) {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_PROMPT_HEIGHT)}px`;
+    // A scrollbar only once the text outgrows the limit: below it, a rounding pixel of
+    // overflow would show one (and, on WebKitGTK, a horizontal one with it).
+    el.style.overflowY = el.scrollHeight > MAX_PROMPT_HEIGHT ? "auto" : "hidden";
   }, [text]);
 
   // A textarea that scrolls loses content width to its scrollbar: give the mirror the same
@@ -347,6 +357,37 @@ export function Composer(props: ComposerProps) {
     const url = await call(commands.clipboardImage());
     const image = url ? imageFromDataUrl(url, "image") : null;
     if (image && fitsLimit("image", (image.data.length * 3) / 4)) addImages([image]);
+  };
+
+  /** Files picked with the paperclip: images go with the message, other files as attachments. */
+  const attachPaths = (paths: readonly string[]) => {
+    const refs: FileRef[] = [];
+    for (const path of paths) {
+      if (IMAGE_EXTENSIONS.test(path)) {
+        const name = fileName(path);
+        void invokeLocal<string>("fs_read_image", { path })
+          .then((url) => {
+            const image = imageFromDataUrl(url, name);
+            if (image) addImages([image]);
+          })
+          .catch(() => notifications().notify({ level: "warning", title: tx`Couldn't attach ${name}` }));
+      } else {
+        refs.push({ path, rel: path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path, attached: true });
+      }
+    }
+    if (refs.length) updateComposer(id, { files: [...composerDraft(id).files, ...refs] });
+  };
+
+  const pickFiles = async () => {
+    if (!isTauri()) {
+      imageInput.current?.click();
+      return;
+    }
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    // The system's own file dialog, opening where it was last used: files come from anywhere.
+    const picked = await open({ multiple: true, directory: false, title: tx("Attach Files") });
+    if (picked) attachPaths(Array.isArray(picked) ? picked : [picked]);
+    ref.current?.focus();
   };
 
   // Files dropped from the OS onto the box: images are attached, other files referenced.
@@ -561,6 +602,28 @@ export function Composer(props: ComposerProps) {
           <ImagePreview image={preview} onClose={() => setPreview(null)} />
         </div>
       )}
+      {attached.length > 0 && (
+        <div className={styles.files} onClick={(e) => e.stopPropagation()}>
+          {attached.map((f) => (
+            <span key={f.path} className={styles.fileChip} title={f.path}>
+              <Icon name={fileIconName(fileName(f.path), f.path)} size={14} />
+              <span className={styles.fileName}>{fileName(f.path)}</span>
+              <button
+                type="button"
+                className={styles.removeFile}
+                aria-label={tx("Remove Attachment")}
+                onClick={() =>
+                  updateComposer(id, {
+                    files: composerDraft(id).files.filter((g) => !(g.attached && g.path === f.path)),
+                  })
+                }
+              >
+                <Icon name="close" size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className={styles.field}>
         {/* The text is painted here with `@file` / `/skill` tags; the textarea above it
             keeps native editing, selection and the caret. */}
@@ -626,11 +689,12 @@ export function Composer(props: ComposerProps) {
             }}
           />
           <IconButton
-            icon="image"
-            title="Attach Image…"
+            icon="attachment"
+            title="Attach Files…"
             className={styles.composerButton}
-            onClick={() => imageInput.current?.click()}
+            onClick={() => void pickFiles()}
           />
+          <AccountUsageButton className={styles.composerButton} />
           <input
             ref={imageInput}
             type="file"
