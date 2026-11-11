@@ -28,6 +28,7 @@ import { TaskStatusMark } from "./TaskStatusMark";
 import { taskActions, useAgentsHeaderMenu } from "./taskActions";
 import { replyActions } from "./replyActions";
 import { agentService } from "./agentService";
+import { TOOL_TEXT_KIND, toolTextTitle } from "./toolText";
 
 /** Settings › Agents › Coding Agents (also used by the Settings window). */
 export function activateSettingsPages(): () => void {
@@ -112,6 +113,15 @@ export function activate(): () => void {
         const task = useAgents.getState().tasks.get((input.data as { task: string }).task);
         return task ? providerIcon(task.provider) : "toolwindow-agents";
       },
+      restorable: true,
+    }),
+    // A command's IN / OUT, opened from the conversation.
+    registerEditorKind({
+      kind: TOOL_TEXT_KIND,
+      component: lazyComponent(() => import("./ToolTextEditor").then((m) => m.ToolTextEditor)),
+      title: toolTextTitle,
+      icon: (input) =>
+        (input.data as { fileName?: string } | undefined)?.fileName === "output.txt" ? "file" : "terminal",
       restorable: true,
     }),
     // An explicit editor drop sets the placement for subsequent sessions too.

@@ -1196,3 +1196,26 @@ fn mcp_servers_become_an_mcp_config() {
     drop(path);
     assert!(!kept.exists());
 }
+
+#[test]
+fn remote_control_is_the_clients_command() {
+    let prompt = |t: &str| json!([{ "type": "text", "text": t }]);
+    assert_eq!(remote_control_command(&prompt("/remote-control")), Some(true));
+    assert_eq!(remote_control_command(&prompt("  /remote-control on ")), Some(true));
+    assert_eq!(remote_control_command(&prompt("/remote-control OFF")), Some(false));
+    // Anything else goes to Claude Code as typed.
+    assert_eq!(remote_control_command(&prompt("/remote-controls")), None);
+    assert_eq!(remote_control_command(&prompt("/remote-control please")), None);
+    assert_eq!(remote_control_command(&prompt("use /remote-control")), None);
+    assert_eq!(
+        remote_control_command(
+            &json!([{ "type": "text", "text": "/remote-control" }, { "type": "text", "text": "x" }])
+        ),
+        None
+    );
+
+    let init = |available: bool| json!({ "commands": [], "remote_control_available": available });
+    let names = |s: Settings| s.commands.iter().map(|c| c["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    assert_eq!(names(Settings::from_cli(&init(true), &json!({}))), [REMOTE_CONTROL]);
+    assert!(names(Settings::from_cli(&init(false), &json!({}))).is_empty());
+}

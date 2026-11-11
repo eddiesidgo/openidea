@@ -362,6 +362,9 @@ pub enum AgentEntry {
         /// Text the tool reported (command output…), truncated.
         output: Option<String>,
         diffs: Vec<AgentToolDiff>,
+        /// The whole command a command tool ran (its title shows the first line only).
+        #[serde(default)]
+        input: Option<String>,
     },
     Plan {
         items: Vec<AgentPlanItem>,

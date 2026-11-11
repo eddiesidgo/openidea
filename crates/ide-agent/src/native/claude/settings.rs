@@ -76,6 +76,14 @@ impl Settings {
             mode: init.get("current_permission_mode").and_then(Value::as_str).unwrap_or("default").to_owned(),
             commands: commands(init.get("commands"), &[]),
         };
+        // Claude Code's /remote-control is its terminal's: here it is a control request.
+        if init.get("remote_control_available").and_then(Value::as_bool) == Some(true) {
+            out.commands.push(json!({
+                "name": super::REMOTE_CONTROL,
+                "description": "Continue this session from claude.ai or the Claude app (\"off\" stops it)",
+                "input": { "hint": "[off]" },
+            }));
+        }
         out.model = out.model_value(configured, applied);
         out
     }

@@ -1,0 +1,421 @@
+<style>
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--openidea-border);
+    font-size: 12px;
+  }
+  .bar.hidden {
+    display: none;
+  }
+  .grow {
+    flex: 1;
+  }
+  input[type="text"],
+  select {
+    min-width: 0;
+    height: 22px;
+    box-sizing: border-box;
+    padding: 0 6px;
+    border: 1px solid var(--openidea-border);
+    border-radius: 4px;
+    background: var(--openidea-bg-input, transparent);
+    color: var(--openidea-fg);
+    font: inherit;
+    outline: none;
+  }
+  input[type="text"] {
+    width: 120px;
+  }
+  input[type="text"]:focus,
+  select:focus {
+    border-color: var(--openidea-focus-ring, var(--openidea-accent));
+  }
+  button {
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--openidea-border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--openidea-fg);
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover {
+    background: var(--openidea-bg-hover);
+  }
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--openidea-fg-muted);
+  }
+  input[type="range"] {
+    width: 64px;
+  }
+  .field {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+  }
+  .field.grass {
+    background: linear-gradient(#87ceeb33 0%, #87ceeb11 60%, #4caf5066 60%, #2e7d3266 100%);
+  }
+  .field.night {
+    background: radial-gradient(circle at 80% 15%, #fff8 0 2px, transparent 3px),
+      radial-gradient(circle at 30% 25%, #fff6 0 1px, transparent 2px), linear-gradient(#0b1a3a 0%, #1d2b53 70%, #263238 70%);
+  }
+  .field.beach {
+    background: linear-gradient(#81d4fa55 0%, #4fc3f744 55%, #ffe08266 55%, #ffcc8055 100%);
+  }
+  .field.cave {
+    background: linear-gradient(#3e2723 0%, #4e342e 75%, #5d4037 75%);
+  }
+  .pet {
+    position: absolute;
+    bottom: 6px;
+    left: 0;
+    transform-origin: 50% 100%;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .pet img {
+    display: block;
+    image-rendering: pixelated;
+    pointer-events: none;
+  }
+  .pet .ball {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--openidea-fg-muted);
+    border-radius: 50%;
+    background: linear-gradient(var(--openidea-danger, #e53935) 0 45%, var(--openidea-fg-muted) 45% 55%, #fff 55%);
+  }
+  .pet.jump {
+    animation: jump 0.45s ease-out;
+  }
+  @keyframes jump {
+    40% {
+      translate: 0 -18px;
+    }
+  }
+  .heart {
+    position: absolute;
+    left: 50%;
+    top: -4px;
+    width: 12px;
+    height: 12px;
+    translate: -50% 0;
+    animation: rise 1s ease-out forwards;
+    pointer-events: none;
+  }
+  @keyframes rise {
+    to {
+      translate: -50% -26px;
+      opacity: 0;
+    }
+  }
+  .empty,
+  .status {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    color: var(--openidea-fg-muted);
+    font-size: 12px;
+    text-align: center;
+    pointer-events: none;
+  }
+  .empty[hidden] {
+    display: none;
+  }
+  .status {
+    inset: 0 0 auto auto;
+    display: block;
+    padding: 4px 8px;
+  }
+</style>
+<div class="app">
+  <div class="bar" id="bar">
+    <input type="text" id="search" list="names" placeholder="Name or #" aria-label="Pokémon name or number" />
+    <datalist id="names"></datalist>
+    <button id="add" title="Add this Pokémon">Add</button>
+    <button id="random" title="Add a random Pokémon">Random</button>
+    <span class="grow"></span>
+    <label title="Size">Size <input type="range" id="size" min="0.5" max="3" step="0.25" /></label>
+    <label title="Speed">Speed <input type="range" id="speed" min="0.25" max="3" step="0.25" /></label>
+    <select id="scene" aria-label="Scene">
+      <option value="none">No scene</option>
+      <option value="grass">Grass</option>
+      <option value="night">Night</option>
+      <option value="beach">Beach</option>
+      <option value="cave">Cave</option>
+    </select>
+    <button id="clear" title="Remove every Pokémon">Clear</button>
+    <button id="hide" title="Hide the controls (double-click the field to show them)">▴</button>
+  </div>
+  <div class="field" id="field">
+    <div class="empty" id="empty">Add a Pokémon by its name or Pokédex number.</div>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+<script>
+  (() => {
+    const MAX_PETS = 20;
+    const $ = (id) => document.getElementById(id);
+    const field = $("field");
+    const bar = $("bar");
+    let state = { pets: [], size: 1, speed: 1, scene: "none", controls: true };
+    let last = 1025;
+    let names = null;
+    const sprites = new Map(); // id → data URL
+    const waiting = new Map(); // id → callbacks
+    const pets = []; // { id, el, x, dir, pause, w }
+
+    const send = (message) => openidea.postMessage(JSON.stringify(message));
+    let saveTimer = 0;
+    const save = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        state.pets = pets.map((p) => ({ id: p.id }));
+        send({ op: "save", state });
+      }, 300);
+    };
+    const status = (text) => {
+      $("status").textContent = text || "";
+    };
+
+    function withSprite(id, fn) {
+      if (sprites.has(id)) return fn(sprites.get(id));
+      if (waiting.has(id)) return waiting.get(id).push(fn);
+      waiting.set(id, [fn]);
+      send({ op: "sprite", id });
+    }
+
+    function nameOf(id) {
+      return (names && names[id - 1]) || `#${id}`;
+    }
+
+    function heart(el) {
+      const h = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      h.setAttribute("viewBox", "0 0 12 12");
+      h.setAttribute("class", "heart");
+      h.innerHTML = '<path d="M6 11 1.5 6.5A2.6 2.6 0 0 1 6 3a2.6 2.6 0 0 1 4.5 3.5Z" fill="#e91e63"/>';
+      el.appendChild(h);
+      setTimeout(() => h.remove(), 1000);
+    }
+
+    function addPet(id, fromState) {
+      if (!Number.isInteger(id) || id < 1 || id > last) return status(`There is no Pokémon #${id}.`);
+      if (pets.length >= MAX_PETS) return status(`${MAX_PETS} Pokémon at most.`);
+      const el = document.createElement("div");
+      el.className = "pet";
+      el.title = `${nameOf(id)} (double-click to send it home)`;
+      el.innerHTML = '<div class="ball"></div>';
+      field.appendChild(el);
+      const pet = { id, el, x: Math.random() * Math.max(0, field.clientWidth - 40), dir: Math.random() < 0.5 ? -1 : 1, pause: 0, w: 32 };
+      pets.push(pet);
+      el.addEventListener("click", () => {
+        el.classList.remove("jump");
+        void el.offsetWidth;
+        el.classList.add("jump");
+        heart(el);
+      });
+      el.addEventListener("dblclick", () => removePet(pet));
+      withSprite(id, (url) => {
+        if (!url) {
+          el.title = `${nameOf(id)}: the sprite could not be loaded`;
+          return;
+        }
+        const img = new Image();
+        img.alt = nameOf(id);
+        img.onload = () => {
+          pet.baseH = img.naturalHeight;
+          pet.baseW = img.naturalWidth;
+          el.replaceChildren(img);
+          applySize(pet);
+        };
+        img.src = url;
+      });
+      $("empty").hidden = true;
+      if (!fromState) save();
+    }
+
+    function removePet(pet) {
+      pet.el.remove();
+      pets.splice(pets.indexOf(pet), 1);
+      $("empty").hidden = pets.length > 0;
+      save();
+    }
+
+    function applySize(pet) {
+      const img = pet.el.querySelector("img");
+      if (!img) return;
+      img.style.height = `${Math.round(pet.baseH * state.size)}px`;
+      img.style.width = `${Math.round(pet.baseW * state.size)}px`;
+      pet.w = pet.baseW * state.size;
+    }
+
+    function applyScene() {
+      field.className = `field ${state.scene === "none" ? "" : state.scene}`;
+      $("scene").value = state.scene;
+    }
+
+    function applyControls() {
+      bar.classList.toggle("hidden", state.controls === false);
+    }
+
+    // Walking: a few steps one way, a pause, maybe the other way.
+    let then = performance.now();
+    function tick(now) {
+      const dt = Math.min(0.1, (now - then) / 1000);
+      then = now;
+      const width = field.clientWidth;
+      for (const p of pets) {
+        if (p.pause > 0) {
+          p.pause -= dt;
+        } else {
+          p.x += p.dir * 28 * state.speed * dt;
+          if (p.x < 0 || p.x > width - p.w) {
+            p.x = Math.max(0, Math.min(width - p.w, p.x));
+            p.dir = -p.dir;
+          } else if (Math.random() < dt * 0.25) {
+            p.pause = 0.8 + Math.random() * 2.2;
+            if (Math.random() < 0.5) p.dir = -p.dir;
+          }
+        }
+        // The sprites face left: mirrored while walking right.
+        p.el.style.left = `${p.x}px`;
+        p.el.style.scale = p.dir > 0 ? "-1 1" : "1 1";
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function find(text) {
+      const t = text.trim().toLowerCase().replace(/^#/, "");
+      if (!t) return null;
+      if (/^\d+$/.test(t)) return Number(t);
+      const match = t.match(/^#?(\d+)\b/);
+      if (match) return Number(match[1]);
+      const i = names ? names.findIndex((n) => n === t || n.replace(/-/g, " ") === t) : -1;
+      return i >= 0 ? i + 1 : undefined;
+    }
+
+    function addTyped() {
+      const id = find($("search").value);
+      if (id === null) return;
+      if (id === undefined) {
+        status(names ? `No Pokémon is called “${$("search").value.trim()}”.` : "Loading the names…");
+        if (!names) send({ op: "names" });
+        return;
+      }
+      addPet(id);
+      $("search").value = "";
+      status("");
+    }
+
+    const addRandom = () => addPet(1 + Math.floor(Math.random() * Math.min(last, 649)));
+    function clearAll() {
+      for (const p of [...pets]) p.el.remove();
+      pets.length = 0;
+      $("empty").hidden = false;
+      save();
+    }
+
+    $("add").onclick = addTyped;
+    $("random").onclick = addRandom;
+    $("clear").onclick = clearAll;
+    $("search").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") addTyped();
+    });
+    $("search").addEventListener("focus", () => {
+      if (!names) send({ op: "names" });
+    });
+    $("size").oninput = (e) => {
+      state.size = Number(e.target.value);
+      pets.forEach(applySize);
+      save();
+    };
+    $("speed").oninput = (e) => {
+      state.speed = Number(e.target.value);
+      save();
+    };
+    $("scene").onchange = (e) => {
+      state.scene = e.target.value;
+      applyScene();
+      save();
+    };
+    $("hide").onclick = () => {
+      state.controls = false;
+      applyControls();
+      save();
+    };
+    field.addEventListener("dblclick", (e) => {
+      if (e.target !== field) return;
+      state.controls = true;
+      applyControls();
+      save();
+    });
+
+    openidea.onMessage((raw) => {
+      let m;
+      try {
+        m = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (m.op === "state") {
+        last = m.last || last;
+        state = { ...state, ...m.state };
+        $("size").value = state.size;
+        $("speed").value = state.speed;
+        applyScene();
+        applyControls();
+        for (const p of state.pets || []) addPet(Number(p.id), true);
+        // Their names, for the tooltips and the search (cached by the plugin after the first time).
+        send({ op: "names" });
+      } else if (m.op === "sprite") {
+        sprites.set(m.id, m.url || null);
+        if (m.error) status(m.error);
+        for (const fn of waiting.get(m.id) || []) fn(m.url || null);
+        waiting.delete(m.id);
+      } else if (m.op === "names") {
+        if (m.error) return status(m.error);
+        names = m.names;
+        $("names").replaceChildren(
+          ...names.map((n, i) => {
+            const o = document.createElement("option");
+            o.value = n;
+            o.label = `#${i + 1}`;
+            return o;
+          }),
+        );
+        for (const p of pets) p.el.title = `${nameOf(p.id)} (double-click to send it home)`;
+        status("");
+      } else if (m.op === "add-random") {
+        addRandom();
+      } else if (m.op === "clear") {
+        clearAll();
+      }
+    });
+
+    send({ op: "ready" });
+    requestAnimationFrame(tick);
+  })();
+</script>

@@ -1,0 +1,33 @@
+id = "community.pokemon-pets"
+name = "Pokémon Pets"
+version = "0.1.0"
+description = "Pokémon that walk around a tool window below the Project files (or wherever you move it), like vscode-pokemon: add them by name or number, click them, change their size, speed and scene. Sprites are fetched from the public PokeAPI sprites repository."
+authors = ["OpenIDEA fork contributors"]
+license = "Apache-2.0"
+change-notes = "0.1.0 — first release: walking pets, add/remove by name or Pokédex number, size, speed and scene, kept between sessions."
+categories = ["other"]
+engines.openidea = "^1.3"
+wasm = "dist/plugin.wasm"
+activation = ["on-view:pets", "on-command:*"]
+
+[capabilities]
+required = ["storage", "net:raw.githubusercontent.com", "net:pokeapi.co"]
+
+# Below the Project files: the secondary split of the left dock. Drag its stripe button
+# elsewhere (or float it) like any tool window.
+[[contributes.views]]
+id = "pets"
+title = "Pokémon"
+icon = "icons/pets.svg"
+location = "left"
+secondary = true
+
+[[contributes.commands]]
+id = "add-random"
+title = "Pokémon: Add a Random Pokémon"
+category = "Pokémon"
+
+[[contributes.commands]]
+id = "clear"
+title = "Pokémon: Remove All"
+category = "Pokémon"

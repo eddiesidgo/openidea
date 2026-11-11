@@ -60,6 +60,7 @@ import { isImeKey } from "@/platform/ime";
 import { openDiff, withChain, type DiffData } from "@/features/vcs/diffInput";
 import { Composer } from "./Composer";
 import { SubmitButton } from "./SubmitButton";
+import { openToolText } from "./toolText";
 import {
   canSend,
   costLabel,
@@ -1805,7 +1806,8 @@ const ToolEntry = memo(function ToolEntry({
       )}
     </>
   );
-  if (!entry.output)
+  const command = entry.kind === "execute";
+  if (!entry.output && !command)
     return (
       <div className={styles.process}>
         <div className={styles.tool}>{head}</div>
@@ -1823,11 +1825,38 @@ const ToolEntry = memo(function ToolEntry({
           </summary>
         }
       >
-        <pre className={styles.output}>{entry.output}</pre>
+        {command ? <CommandIO task={task} entry={entry} /> : <pre className={styles.output}>{entry.output}</pre>}
       </Fold>
     </div>
   );
 });
+
+/**
+ * A command and what it printed, as Claude Code shows them: an IN and an OUT part, each
+ * opening in an editor tab of its own.
+ */
+function CommandIO({ task, entry }: { task: AgentTask; entry: Extract<AgentEntry, { type: "tool" }> }) {
+  const command = entry.input ?? entry.title;
+  const parts: Array<{ part: "IN" | "OUT"; text: string }> = [{ part: "IN", text: command }];
+  if (entry.output) parts.push({ part: "OUT", text: entry.output });
+  return (
+    <div className={clsx(styles.commandIO, entry.status === "failed" && styles.commandFailed)}>
+      {parts.map(({ part, text }) => (
+        <div key={part} className={styles.ioPart}>
+          <span className={styles.ioLabel}>{part}</span>
+          <pre className={styles.ioText}>{text}</pre>
+          <IconButton
+            size="small"
+            icon="editor-only"
+            className={styles.ioOpen}
+            title={part === "IN" ? "Open Command in Editor" : "Open Output in Editor"}
+            onClick={() => openToolText(task, entry, part, text)}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function SubagentStatusIcon({ status }: { status: SubagentEntry["status"] }) {
   switch (status) {

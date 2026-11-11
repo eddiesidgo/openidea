@@ -1680,20 +1680,12 @@
 }
 
 /* A tool call: its name, then its argument in the code font. */
-.toolTitle {
-  display: inline-flex;
-  align-items: baseline;
-  white-space: pre;
-}
 .toolVerb {
   flex: none;
   color: var(--fg-strong);
   font-weight: 600;
 }
 .toolArg {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--fg-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
@@ -1743,4 +1735,58 @@
 .permissionAsking .permissionOption:focus-visible {
   background: var(--bg-hover);
   color: var(--fg-strong);
+}
+
+/* A command unfolded: its IN and OUT, as Claude Code shows them. */
+.commandIO {
+  display: grid;
+  margin-top: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-tab);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.commandFailed {
+  border-color: var(--danger);
+}
+.ioPart {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  min-width: 0;
+}
+.ioPart + .ioPart {
+  border-top: 1px solid var(--border-strong);
+}
+.ioLabel {
+  padding: 6px 0 6px 10px;
+  color: var(--fg-subtle);
+  font-weight: 600;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ioText {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  padding: 6px 34px 6px 4px;
+  color: var(--fg-secondary);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ioPart:first-child .ioText {
+  color: var(--fg);
+}
+.ioOpen {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  opacity: 0;
+}
+.ioPart:hover .ioOpen,
+.ioOpen:focus-visible {
+  opacity: 1;
 }

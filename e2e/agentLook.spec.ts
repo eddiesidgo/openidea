@@ -106,6 +106,7 @@ const entries: AgentEntry[] = [
     locations: [],
     output: "1 failing: redirects to next",
     diffs: [],
+    input: "cd /dev/acme-api\nnpm test -- login",
   },
   {
     type: "permission",
@@ -188,5 +189,20 @@ for (const theme of ["dark", "light"] as const) {
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { answer?: string }).answer))
       .toBe("allow-always");
+
+    // A command unfolds into its IN (the whole command) and OUT, each opening in the editor.
+    await stream.getByText("npm test -- login", { exact: true }).click();
+    const io = stream.locator('[class*="_commandIO_"]');
+    await expect(io.locator('[class*="_ioLabel_"]')).toHaveText(["IN", "OUT"]);
+    await expect(io.locator('[class*="_ioText_"]')).toHaveText([
+      "cd /dev/acme-api\nnpm test -- login",
+      "1 failing: redirects to next",
+    ]);
+    await shot(page, `look-io-${theme}`);
+    await io.locator('[class*="_ioPart_"]').first().hover();
+    await io.getByRole("button", { name: "Open Command in Editor" }).click();
+    await expect(page.getByRole("tab", { name: /IN: npm test -- login/ })).toBeVisible();
+    await expect(page.locator(".cm-content").last()).toContainText("npm test -- login");
+    await shot(page, `look-in-editor-${theme}`);
   });
 }

@@ -33,6 +33,9 @@ use translate::{Translator, Update};
 
 use crate::provider::ProviderSpec;
 
+/// The client's own slash command: turns Claude Code's Remote Control on (or `off`).
+pub(super) const REMOTE_CONTROL: &str = "remote-control";
+
 /// How long the CLI gets to answer a control request.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(60);
 /// A stop that arrives this long before its prompt (the two race) still stops it.
@@ -817,6 +820,9 @@ impl Session {
 
     async fn prompt(self: &Arc<Self>, prompt: &Value) -> Result<TurnEnd, (i64, String, Option<Value>)> {
         let proc = self.ensure().await.map_err(internal)?;
+        if let Some(enable) = remote_control_command(prompt) {
+            return Ok(self.remote_control(&proc, enable).await);
+        }
         let uuid = new_uuid(false);
         let message = user_message(prompt, &uuid, false);
         let rx = {
@@ -837,6 +843,27 @@ impl Session {
             rx
         };
         Ok(rx.await.unwrap_or_else(|_| TurnEnd::Fail { message: "Claude Code exited.".into(), data: None }))
+    }
+
+    /// Turns Remote Control on or off, answering in the conversation (with the link to the
+    /// session when it is on). No model turn: the CLI's bridge does the work.
+    async fn remote_control(&self, proc: &Arc<Proc>, enable: bool) -> TurnEnd {
+        let reply = proc.control(json!({ "subtype": "remote_control", "enabled": enable })).await;
+        let text = match (reply, enable) {
+            (Ok(r), true) => match r.get("session_url").and_then(Value::as_str).filter(|u| !u.is_empty()) {
+                Some(url) => format!("Remote Control is on: continue this session at {url}"),
+                None => "Remote Control is on: continue this session from claude.ai or the Claude app.".to_owned(),
+            },
+            (Ok(_), false) => "Remote Control is off.".to_owned(),
+            (Err(e), _) => return TurnEnd::Fail { message: format!("Remote Control: {e}"), data: None },
+        };
+        if let Some(shim) = self.shim() {
+            shim.notify(vec![Update {
+                session: self.id.clone(),
+                update: json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": text } }),
+            }]);
+        }
+        TurnEnd::Stop("end_turn")
     }
 
     fn steer(&self, prompt: Value) -> Result<(), String> {
@@ -1348,6 +1375,25 @@ fn usage_limit(text: &str, resets_ms: Option<f64>) -> TurnEnd {
     TurnEnd::Fail {
         message: text.to_owned(),
         data: Some(json!({ "openidea": { "usageLimit": { "resetsAtMs": resets_ms } } })),
+    }
+}
+
+/// `/remote-control` (on) or `/remote-control off` as a prompt's only text: whether to enable it.
+fn remote_control_command(prompt: &Value) -> Option<bool> {
+    let mut texts = prompt.as_array()?.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("text"));
+    let text = texts.next()?.get("text")?.as_str()?.trim();
+    if texts.next().is_some() {
+        return None;
+    }
+    let rest = text.strip_prefix('/')?.strip_prefix(REMOTE_CONTROL)?;
+    // Another command that starts the same way (`/remote-controls`) is the agent's.
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    match rest.trim().to_ascii_lowercase().as_str() {
+        "" | "on" => Some(true),
+        "off" | "stop" => Some(false),
+        _ => None,
     }
 }
 

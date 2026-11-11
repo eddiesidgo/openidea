@@ -1,4 +1,6 @@
 {
+  "Open Command in Editor": "在编辑器中打开命令",
+  "Open Output in Editor": "在编辑器中打开输出",
   "Yes, don't ask again this session": "是，本次会话不再询问",
   "{title} (double-click to rename)": "{title}（双击重命名）",
   "Related targets": "相关目标",

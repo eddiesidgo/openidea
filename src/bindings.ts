@@ -1649,7 +1649,9 @@ steered?: boolean } | { type: "agent"; text: string } | { type: "thought"; text:
 /**  ACP tool kind: `read`, `edit`, `execute`, `search`, `fetch`, `think`… */
 kind: string; status: AgentToolStatus; locations: IpcPath[]; 
 /**  Text the tool reported (command output…), truncated. */
-output: string | null; diffs: AgentToolDiff[] } | { type: "plan"; items: AgentPlanItem[] } | 
+output: string | null; diffs: AgentToolDiff[]; 
+/**  The whole command a command tool ran (its title shows the first line only). */
+input?: string | null } | { type: "plan"; items: AgentPlanItem[] } | 
 /**  A subagent the agent started: its own session, whose entries are listed separately. */
 { type: "subagent"; 
 /**  The subagent's session id. */

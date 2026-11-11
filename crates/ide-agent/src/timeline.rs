@@ -68,6 +68,7 @@ impl Timeline {
                     locations: locations(update.get("locations")),
                     output: None,
                     diffs: Vec::new(),
+                    input: command_of(update.get("rawInput")),
                 };
                 let index = match self.tools.get(&id) {
                     Some(&i) => {
@@ -127,10 +128,14 @@ impl Timeline {
     }
 
     fn merge_tool(&mut self, index: usize, update: &Value) {
-        let AgentEntry::Tool { title, kind, status, locations: locs, output, diffs, .. } = &mut self.entries[index]
+        let AgentEntry::Tool { title, kind, status, locations: locs, output, diffs, input, .. } =
+            &mut self.entries[index]
         else {
             return;
         };
+        if let Some(command) = command_of(update.get("rawInput")) {
+            *input = Some(command);
+        }
         if let Some(t) = update.get("title").and_then(Value::as_str) {
             *title = t.to_owned();
         }
@@ -315,6 +320,17 @@ impl Timeline {
     }
 }
 
+/// The command of a command tool's `rawInput`: a string, or an argv array (joined by spaces).
+fn command_of(raw: Option<&Value>) -> Option<String> {
+    let command = raw?.get("command")?;
+    let text = match command {
+        Value::String(s) => s.clone(),
+        Value::Array(args) => args.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "),
+        _ => return None,
+    };
+    (!text.trim().is_empty()).then_some(text)
+}
+
 fn str_field(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned()
 }
@@ -424,6 +440,21 @@ mod tests {
         assert_eq!(locations, &vec![IpcPath("/p/a.rs".into())]);
         // Unknown calls are ignored.
         assert!(t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "zz"})).changed.is_empty());
+    }
+
+    #[test]
+    fn a_command_keeps_its_whole_text_beside_its_one_line_title() {
+        let mut t = Timeline::default();
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "cd app", "kind": "execute",
+            "status": "pending", "rawInput": {"command": "cd app\nnpm test", "description": "Run tests"}}));
+        let AgentEntry::Tool { title, input, .. } = &t.entries[0] else { panic!() };
+        assert_eq!((title.as_str(), input.as_deref()), ("cd app", Some("cd app\nnpm test")));
+        // An argv array (Codex), sent later by an update.
+        t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c2", "title": "ls", "kind": "execute"}));
+        t.apply(&json!({"sessionUpdate": "tool_call_update", "toolCallId": "c2",
+            "rawInput": {"command": ["ls", "-la"]}}));
+        let AgentEntry::Tool { input, .. } = &t.entries[1] else { panic!() };
+        assert_eq!(input.as_deref(), Some("ls -la"));
     }
 
     #[test]
