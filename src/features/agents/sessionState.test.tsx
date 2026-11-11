@@ -98,6 +98,12 @@ const tool = (id: string, overrides: Partial<Extract<AgentEntry, { type: "tool" 
   ...overrides,
 });
 
+/** The work of a turn folded together (not the default, which lists every tool call). */
+const GROUPED = { toolCalls: "grouped", foldTurns: true };
+
+/** The timeline dot of each conversation row, `null` for rows off it. */
+const dots = () => [...stream().children].map((row) => row.getAttribute("data-dot"));
+
 let disposeActions: () => void;
 const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
 afterEach(() => {
@@ -131,7 +137,7 @@ beforeEach(() => {
 });
 
 describe("conversation rows", () => {
-  it("keeps authors above messages and their folded work with matching icon-only actions", async () => {
+  it("puts the agent's side on a timeline, without author labels, with matching icon-only actions", async () => {
     useProject.setState({ settings: { agents: { foldTurns: false } } as never });
     const user = (text: string): AgentEntry => ({
       type: "user",
@@ -154,10 +160,9 @@ describe("conversation rows", () => {
     useAgents.setState({ entries: new Map(backend.entries) });
     render(<SessionEditor input={input("A")} />);
     await screen.findByText("More detail");
-    expect(stream().querySelectorAll(`.${styles.agentAuthor} .${styles.role}`)).toHaveLength(2);
-    const author = stream().querySelectorAll(`.${styles.agentAuthor}`)[1]!;
-    expect(author.nextElementSibling).toHaveClass(styles.processRun!);
-    expect(author.parentElement?.nextElementSibling?.firstElementChild).toHaveClass(styles.agentMessage!);
+    expect(stream()).not.toHaveTextContent("You");
+    // Your messages stay off the timeline; each of the agent's blocks gets a dot by its kind.
+    expect(dots()).toEqual([null, "text", "completed", "text", null, "thought", "completed", "text"]);
     const quote = within(stream()).getAllByRole("button", { name: "Quote Reply" });
     const copy = within(stream()).getAllByRole("button", { name: "Copy Markdown" });
     // One per turn: only a turn's final reply carries actions.
@@ -172,7 +177,7 @@ describe("conversation rows", () => {
     expect(within(stream()).getAllByRole("button", { name: "Copy" })[0]?.className).toBe(copy[0]?.className);
   });
 
-  it.each([null, "allow"])("keeps tool, reasoning, plan and approval rows in one author run (%s)", async (chosen) => {
+  it.each([null, "allow"])("keeps tool, reasoning, plan and approval rows on one timeline (%s)", async (chosen) => {
     backend.entries.set("A", [
       { type: "agent", text: "I’ll read package.json…" },
       tool("one"),
@@ -187,12 +192,15 @@ describe("conversation rows", () => {
     useAgents.setState({ entries: new Map(backend.entries) });
     render(<SessionEditor input={input("A")} />);
     await screen.findByText("Done");
-    expect(stream().querySelectorAll(`.${styles.agentAuthor}`)).toHaveLength(1);
-    expect(stream().firstElementChild?.firstElementChild).toHaveClass(styles.agentAuthor!);
+    expect(dots()).toEqual(
+      chosen
+        ? ["text", "completed", "completed", "text", "running", "permission", "text", "thought", "text"]
+        : ["text", "completed", "completed", "text", "running", null, "text", "thought", "text"],
+    );
   });
 
   it.each<AgentEntry>([subagent, { type: "message", incoming: true, text: "Parent request" }])(
-    "starts another author run after $type entries",
+    "places $type entries on the timeline as the agent's or the parent's",
     async (other) => {
       backend.entries.set("A", [
         { type: "agent", text: "Before the switch" },
@@ -204,11 +212,7 @@ describe("conversation rows", () => {
       useAgents.setState({ entries: new Map(backend.entries) });
       render(<SessionEditor input={input("A")} />);
       await screen.findByText("After the work");
-      const authors = stream().querySelectorAll(`.${styles.agentAuthor}`);
-      expect(authors).toHaveLength(2);
-      expect(stream().children[1]?.querySelector(`.${styles.agentAuthor}`)).toBeNull();
-      expect(authors[1]?.nextElementSibling).toHaveClass(styles.processRun!);
-      expect(authors[1]?.parentElement?.nextElementSibling?.firstElementChild).toHaveClass(styles.agentMessage!);
+      expect(dots()).toEqual(["text", other.type === "subagent" ? "text" : null, "thought", "completed", "text"]);
     },
   );
 
@@ -231,7 +235,7 @@ describe("conversation rows", () => {
     expect(footer?.firstElementChild).toHaveClass(styles.messageTime!);
     expect(footer?.firstElementChild).toHaveTextContent("12s");
     expect(footer?.lastElementChild).toHaveClass(styles.messageActions!);
-    // Your message keeps its actions and time beside "You", above it.
+    // Your message keeps its actions and time in its head, above it.
     expect(stream().querySelector(`.${styles.userMessage} > .${styles.messageFooter}`)).toBeNull();
     expect(
       stream().querySelector(`.${styles.userMessage} > .${styles.messageHead} .${styles.messageActions}`),
@@ -247,6 +251,8 @@ describe("conversation rows", () => {
 });
 
 describe("process folding", () => {
+  beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
+
   it("folds reasoning and tool calls into one block", async () => {
     backend.entries.set("A", [
       { type: "thought", text: "think one" },
@@ -275,6 +281,8 @@ describe("process folding", () => {
 });
 
 describe("turn folding", () => {
+  beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
+
   it("folds a finished turn's work under its message and keeps the reply", async () => {
     backend.entries.set("A", [
       { type: "user", text: "Question", attachments: [], steered: false, sentMs: 1000, doneMs: 13000 },
@@ -319,6 +327,8 @@ describe("turn folding", () => {
 });
 
 describe("folded content", () => {
+  beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
+
   it("is rendered for Find in Conversation, so its text is found", async () => {
     backend.entries.set("A", [
       tool("one", { output: "needle in a tool output" }),
@@ -552,6 +562,8 @@ describe("scrolling", () => {
 });
 
 describe("tool calls", () => {
+  beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
+
   it.each(["pending", "running"] as const)(
     "keeps %s tools outside folds with their output expanded",
     async (status) => {

@@ -8,10 +8,10 @@ describe("agent chat settings", () => {
       showWorkTime: true,
       showUsageLimits: true,
       showCost: false,
-      foldTurns: true,
+      foldTurns: false,
       smoothText: true,
       thinking: "auto",
-      toolCalls: "grouped",
+      toolCalls: "each",
       expandToolOutput: false,
       sendWith: "enter",
       whileRunning: "queue",
@@ -37,7 +37,7 @@ describe("agent chat settings", () => {
     }).agents;
     expect(stored).toMatchObject({
       thinking: "collapsed",
-      toolCalls: "grouped",
+      toolCalls: "each",
       sendWith: "modEnter",
       defaults: { claude: { model: "opus" }, codex: {} },
     });

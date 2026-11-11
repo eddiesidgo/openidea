@@ -1,4 +1,6 @@
 {
+  "Yes, don't ask again this session": "是，本次会话不再询问",
+  "{title} (double-click to rename)": "{title}（双击重命名）",
   "Related targets": "相关目标",
   "GDB (C, C++)": "GDB（C、C++）",
   "Unknown error": "未知错误",
@@ -6858,7 +6860,6 @@
   "Copied {text}": "已复制 {text}",
   "Reference": "引用",
   "Insert imports on paste": "粘贴时插入导入",
-  "You": "你",
   "Jump to Latest": "跳转到最新位置",
   "Retract Message": "撤回消息",
   "Retract": "撤回",

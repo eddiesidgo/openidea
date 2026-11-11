@@ -45,6 +45,13 @@ async function openHistory(page: Page) {
   await page.getByRole("tree", { name: "Project" }).waitFor();
   await page.evaluate(
     async ({ task, entries }) => {
+      // Turns folded under their messages: what these cases scroll through.
+      const projectPath = "/src/platform/project.ts";
+      const { useProject } = await import(projectPath);
+      const settings = useProject.getState().settings;
+      useProject.setState({
+        settings: { ...settings, agents: { ...settings?.agents, toolCalls: "grouped", foldTurns: true } },
+      });
       const path = "/src/features/agents/store.ts";
       const store = await import(path);
       store.useAgents.setState({

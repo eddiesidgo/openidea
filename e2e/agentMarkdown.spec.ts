@@ -259,8 +259,9 @@ test("keeps chat history readable and selections free of timestamps and status l
   });
   expect(geometry.reply).toBeGreaterThan(0);
   expect(geometry.reply).toBeLessThan(geometry.root);
-  expect(geometry.bubbleLeft).toBeGreaterThan(geometry.replyLeft);
-  expect(geometry.bubbleRight).toBeGreaterThan(geometry.replyRight);
+  // Your message spans the column; the reply is inset by its timeline.
+  expect(geometry.bubbleLeft).toBeLessThan(geometry.replyLeft);
+  expect(geometry.bubbleRight).toBeGreaterThanOrEqual(geometry.replyRight - 1);
   expect(Math.abs(geometry.columnCenter - geometry.composerCenter)).toBeLessThan(1);
   await stream.getByText("hi", { exact: true }).hover();
   await expect(stream.locator("[class*='_messageTime_']").first()).toBeVisible();

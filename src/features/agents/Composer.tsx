@@ -680,7 +680,7 @@ export function Composer(props: ComposerProps) {
         <div className={styles.toolbar}>{props.toolbar}</div>
         <div className={styles.actions}>
           <IconButton
-            icon="paperclip"
+            icon="mention"
             title="Reference a File (@)"
             className={styles.composerButton}
             onClick={() => {

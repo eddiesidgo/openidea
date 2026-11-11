@@ -257,6 +257,7 @@ const ICONS = {
   "page-last": "openidea/general/pageLast",
   sliders: "openidea/general/sliders",
   attachment: "openidea/general/attachment",
+  mention: "openidea/general/mention",
   account: "openidea/general/account",
   sparkle: "openidea/general/sparkle",
   "graphql-variables": "openidea/general/graphqlVariables",

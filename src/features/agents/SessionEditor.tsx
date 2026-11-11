@@ -23,6 +23,7 @@ import type {
   AgentEntry,
   AgentImage,
   AgentLimit,
+  AgentPermissionOption,
   AgentQuestion,
   AgentRetry,
   AgentTask,
@@ -190,6 +191,15 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
       }}
     >
       <div className={styles.conversation} hidden={docked && changesOpen}>
+        <SessionStatus
+          task={task}
+          entries={entries ?? null}
+          head={head}
+          changes={changes ?? null}
+          changesOpen={changesOpen}
+          onToggleChanges={() => setChangesOpen(!changesOpen)}
+          showTitle={!docked}
+        />
         {view && <SubagentBar task={task} path={path} cards={cards} onNavigate={setPath} />}
         <FoldedContent.Provider value={finding && shown}>
           <Stream
@@ -214,7 +224,6 @@ function TaskSession({ id, docked }: { id: string; docked: boolean }) {
             <SessionComposer
               task={task}
               entries={entries ?? null}
-              head={head}
               changes={changes ?? null}
               changesOpen={changesOpen}
               onToggleChanges={() => setChangesOpen(!changesOpen)}
@@ -303,7 +312,10 @@ function StatusActions({
   );
 }
 
-/** The task's agent, model, checkout and state, just above the composer. */
+/**
+ * The session's header: its title (double-click renames it), then the task's agent, model,
+ * checkout and state, its meters, terminal and changes.
+ */
 function SessionStatus({
   task,
   entries,
@@ -311,6 +323,7 @@ function SessionStatus({
   changes,
   changesOpen,
   onToggleChanges,
+  showTitle,
 }: {
   task: AgentTask;
   entries: AgentEntry[] | null;
@@ -318,6 +331,8 @@ function SessionStatus({
   changes: AgentChange[] | null;
   changesOpen: boolean;
   onToggleChanges: () => void;
+  /** The tool window bar above a docked conversation already shows the title. */
+  showTitle: boolean;
 }) {
   const tx = useTx();
   const project = useProject((s) => s.project);
@@ -332,6 +347,15 @@ function SessionStatus({
         showContextMenu(e, taskMenu([task]));
       }}
     >
+      {showTitle && (
+        <span
+          className={styles.statusTitle}
+          title={tx`${task.title} (double-click to rename)`}
+          onDoubleClick={() => void executeAction("agents.renameTask", task.id)}
+        >
+          {task.title}
+        </span>
+      )}
       <Icon name={providerIcon(task.provider)} size={13} className={styles.providerIcon} />
       <span className={styles.statusText} title={task.cwd}>
         {providerName(task.provider)}
@@ -716,19 +740,6 @@ function Stream({ loadError, task, entries, subagent, onOpenSubagent, finding, f
     const rows = conversationRows(entries, start, toolCalls === "grouped");
     return foldTurns && !finding ? foldTurnRows(rows, foldedTurns(entries, start, busy)) : rows;
   }, [entries, start, busy, foldTurns, toolCalls, finding]);
-  const authorHeaders = useMemo(() => {
-    const headers = new Set<number>();
-    const byAgent = (row: ConversationRow) =>
-      row.kind !== "entry" ||
-      (row.entry.type !== "user" &&
-        row.entry.type !== "subagent" &&
-        !(row.entry.type === "message" && row.entry.incoming));
-    rows.forEach((row, i) => {
-      const previous = rows[i - 1];
-      if (byAgent(row) && (!previous || !byAgent(previous))) headers.add(row.index);
-    });
-    return headers;
-  }, [rows]);
   const renderRow = useCallback(
     (row: EntryRow) => (
       <Entry
@@ -864,15 +875,8 @@ function Stream({ loadError, task, entries, subagent, onOpenSubagent, finding, f
                 (row.kind === "entry" && (row.entry.type === "user" || row.entry.type === "agent")) || undefined
               }
               data-process={row.kind !== "entry" || row.entry.type !== "user" || undefined}
+              data-dot={timelineDot(row)}
             >
-              {authorHeaders.has(row.index) && (
-                <div className={styles.agentAuthor}>
-                  <div className={styles.role}>
-                    <Icon name={providerIcon(task.provider)} size={13} />
-                    <span>{providerName(task.provider)}</span>
-                  </div>
-                </div>
-              )}
               {renderConversationRow(row)}
             </div>
           ))
@@ -1130,17 +1134,6 @@ function FindBar({
     </div>
   );
 }
-
-const TOOL_ICONS: Record<string, string> = {
-  read: "file",
-  edit: "edit",
-  delete: "minus",
-  move: "edit",
-  search: "search",
-  execute: "terminal",
-  fetch: "web",
-  think: "todo",
-};
 
 /** Memoized: the earlier entries rendered behind a reopened conversation leave the rest alone. */
 function AgentMessage({
@@ -1410,9 +1403,6 @@ function UserMessage({
           )}
         </MessageActions>
         <MessageTime sentMs={entry.sentMs ?? null} doneMs={null} />
-        <span className={styles.role}>
-          <T>You</T>
-        </span>
       </div>
       <div className={styles.user}>
         <MessageText text={entry.text} />
@@ -1623,6 +1613,32 @@ export function foldTurnRows(rows: ConversationRow[], turns: ReadonlyMap<number,
   return out;
 }
 
+/**
+ * The dot a row of the agent's side of the conversation gets on its timeline, as in Claude
+ * Code: neutral for text, hollow for reasoning, a tool call's by its state. `undefined` for
+ * your messages and for permission requests still waiting (asked above the composer).
+ */
+export function timelineDot(row: ConversationRow): string | undefined {
+  if (row.kind !== "entry") return "work";
+  const e = row.entry;
+  switch (e.type) {
+    case "user":
+      return undefined;
+    case "message":
+      return e.incoming ? undefined : "text";
+    case "thought":
+      return "thought";
+    case "tool":
+      return e.status;
+    case "error":
+      return "failed";
+    case "permission":
+      return e.chosen ? "permission" : undefined;
+    default:
+      return "text";
+  }
+}
+
 /** "Reasoning · Edited 2 files · Read 4 files": what a run of work did. */
 function workSummaryText(work: WorkSummary, tx: ReturnType<typeof useTx>, toolCalls: number): string[] {
   const parts = workParts(work).map((p) => tx(p.text).replace("{count}", String(p.count)));
@@ -1751,11 +1767,22 @@ const ToolEntry = memo(function ToolEntry({
   entry: Extract<AgentEntry, { type: "tool" }>;
 }) {
   const { expandToolOutput } = useAgentSettings();
+  // "Read src/a.ts": the tool's name stands out, its argument follows in the code font.
+  const title = shortTitle(task, entry.title || entry.kind);
+  const space = title.indexOf(" ");
+  // A command's title is the command itself: the shell is its name.
+  const [verb, arg] =
+    entry.kind === "execute"
+      ? [task.provider === "claude" ? "Bash" : "Shell", title]
+      : space > 0
+        ? [title.slice(0, space), title.slice(space + 1)]
+        : [title, ""];
   const head = (
     <>
-      <Icon name={TOOL_ICONS[entry.kind] ?? "run"} size={14} />
       <span className={styles.toolTitle} title={entry.title || entry.kind}>
-        {shortTitle(task, entry.title || entry.kind)}
+        <span className={styles.toolVerb}>{verb}</span>
+        {arg && " "}
+        {arg && <span className={styles.toolArg}>{arg}</span>}
       </span>
       {entry.diffs.map((d) => (
         <button
@@ -1771,8 +1798,11 @@ const ToolEntry = memo(function ToolEntry({
           <span className={styles.added}>+{d.added}</span> <span className={styles.removed}>−{d.removed}</span>
         </button>
       ))}
-      {(entry.status === "running" || entry.status === "pending") && <Spinner size={12} />}
-      {entry.status === "failed" && <Icon name="error" size={12} />}
+      {entry.status === "failed" && (
+        <span className={styles.toolFailed}>
+          <T>Failed</T>
+        </span>
+      )}
     </>
   );
   if (!entry.output)
@@ -1965,7 +1995,9 @@ function PermissionAnswers({
     <span className={className}>
       {entry.options.length ? (
         entry.options.map((o) => {
-          const { label, variant } = permissionOption(o, !!command);
+          const { label: plain, variant } = permissionOption(o, !!command);
+          // Claude Code's own words for its choices, as its VS Code extension shows them.
+          const label = (task.provider === "claude" && claudeChoice(o)) || plain;
           return (
             <Button
               key={o.id}
@@ -1993,6 +2025,20 @@ function PermissionAnswers({
       )}
     </span>
   );
+}
+
+/** A tool permission's choice as Claude Code words it; `null` for the others (plan approval…). */
+function claudeChoice(option: AgentPermissionOption): string | null {
+  switch (option.id) {
+    case "allow":
+      return tx("Yes");
+    case "allow-always":
+      return tx("Yes, don't ask again this session");
+    case "reject":
+      return tx("No");
+    default:
+      return null;
+  }
 }
 
 /** A single inline decision, reduced to a compact record after it is answered. */
@@ -2503,7 +2549,6 @@ function PendingPermission({ task, entry }: { task: AgentTask; entry: Permission
 function SessionComposer({
   task,
   entries,
-  head,
   changes,
   changesOpen,
   onToggleChanges,
@@ -2511,7 +2556,6 @@ function SessionComposer({
 }: {
   task: AgentTask;
   entries: AgentEntry[] | null;
-  head: string | null;
   changes: AgentChange[] | null;
   changesOpen: boolean;
   onToggleChanges: () => void;
@@ -2558,14 +2602,6 @@ function SessionComposer({
     );
   return (
     <div className={styles.composerArea}>
-      <SessionStatus
-        task={task}
-        entries={entries}
-        head={head}
-        changes={changes}
-        changesOpen={changesOpen}
-        onToggleChanges={onToggleChanges}
-      />
       {task.status === "archived" && (
         <div className={styles.banner}>
           <span className={styles.bannerText}>

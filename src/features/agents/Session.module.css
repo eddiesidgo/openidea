@@ -38,15 +38,29 @@
   color: var(--fg-muted);
 }
 
-/* The task's state and its terminal and changes, just above the composer. */
+/* The session's header: title, the task's state, meters, terminal and changes. */
 .statusBar {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 0 2px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
   color: var(--fg-subtle);
   font-size: var(--fs-small);
+}
+/* Shrinks ahead of the state and meters. */
+.statusTitle {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-strong);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .statusActions {
   display: flex;
@@ -1551,4 +1565,182 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- Laid out as in Claude Code for VS Code ---- */
+
+/* Your messages: a framed box across the conversation's width. */
+.userMessage {
+  align-items: stretch;
+}
+.userMessage > .user {
+  width: 100%;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-tab);
+  background: var(--bg-input);
+}
+.userMessage > .messageHead {
+  position: absolute;
+  top: calc(var(--space-2) / -2);
+  right: var(--space-2);
+  z-index: 1;
+  min-height: 0;
+  margin: 0;
+  transform: translateY(-50%);
+}
+
+/* The agent's side of a turn is a timeline: a dot per block, joined by a line. */
+.conversationRow[data-dot] {
+  position: relative;
+  padding-left: 18px;
+}
+.conversationRow[data-dot]::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--fg);
+}
+/* The line runs inside each row (rows are paint-contained), so rows on it touch: their
+   spacing is padding, not margin. It starts at a run's first dot and ends at its last. */
+.stream > .conversationRow[data-dot] + .conversationRow[data-dot] {
+  margin-top: 0;
+}
+.conversationRow[data-dot]:has(+ .conversationRow[data-dot]) {
+  padding-bottom: var(--space-2);
+}
+.conversationRow[data-dot]::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+}
+:not(.conversationRow[data-dot]) + .conversationRow[data-dot]::after,
+.stream > .conversationRow[data-dot]:first-child::after {
+  top: 12px;
+}
+.conversationRow[data-dot]:not(:has(+ .conversationRow[data-dot]))::after {
+  bottom: auto;
+  height: 12px;
+}
+:not(.conversationRow[data-dot]) + .conversationRow[data-dot]:not(:has(+ .conversationRow[data-dot]))::after,
+.stream > .conversationRow[data-dot]:first-child:not(:has(+ .conversationRow[data-dot]))::after {
+  display: none;
+}
+/* The dot sits over the line. */
+.conversationRow[data-dot]::before {
+  z-index: 1;
+}
+/* A tool call that unfolds: its chevron after the title keeps the rows aligned. */
+.conversationRow[data-dot] .toolChevron {
+  order: 10;
+}
+.conversationRow[data-dot="thought"]::before,
+.conversationRow[data-dot="work"]::before {
+  border: 1px solid var(--fg-subtle);
+  background: transparent;
+}
+.conversationRow[data-dot="completed"]::before {
+  background: var(--success);
+}
+.conversationRow[data-dot="failed"]::before {
+  background: var(--danger);
+}
+.conversationRow[data-dot="permission"]::before {
+  background: var(--warning);
+}
+.conversationRow[data-dot="running"]::before,
+.conversationRow[data-dot="pending"]::before {
+  background: var(--fg-muted);
+  animation: timelinePulse 1.2s ease-in-out infinite;
+}
+@keyframes timelinePulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversationRow[data-dot]::before {
+    animation: none;
+  }
+}
+/* Rows on the timeline start at its dot, without their own inset. */
+.conversationRow[data-dot] .tool,
+.conversationRow[data-dot] .thought summary {
+  padding-inline: 0;
+}
+
+/* A tool call: its name, then its argument in the code font. */
+.toolTitle {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: pre;
+}
+.toolVerb {
+  flex: none;
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+.toolArg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.toolFailed {
+  flex: none;
+  color: var(--danger);
+  font-size: var(--fs-small);
+}
+
+/* A permission request: a neutral card whose choices are a numbered list (keys 1, 2, 3…). */
+.permissionAsking {
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+.permissionAsking .permissionAnswers {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  margin-top: var(--space-2);
+  counter-reset: choice;
+}
+.permissionAsking .permissionOption {
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  counter-increment: choice;
+}
+.permissionAsking .permissionOption::before {
+  content: counter(choice);
+  flex: none;
+  min-width: 16px;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+.permissionAsking .permissionOption {
+  border-color: transparent;
+  box-shadow: none;
+  background: transparent;
+  color: var(--fg);
+}
+/* The first choice is the default one, highlighted as in Claude Code. */
+.permissionAsking .permissionOption:first-child,
+.permissionAsking .permissionOption:hover,
+.permissionAsking .permissionOption:focus-visible {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
 }
