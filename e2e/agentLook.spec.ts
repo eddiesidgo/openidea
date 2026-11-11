@@ -168,6 +168,38 @@ for (const theme of ["dark", "light"] as const) {
     expect(layout.promptWidth).toBeGreaterThan(layout.rowWidth - 2);
     expect(layout.promptBorder).toBe("1px");
     expect(layout.text).not.toContain("You");
+    // The accent (Claude's orange by default) frames your message and the message box.
+    const prompt = stream.locator('[class*="_userMessage_"] > [class*="_user_"]').first();
+    await expect(prompt).toHaveCSS("border-top-color", "rgb(217, 119, 87)");
+    const box = page.locator('[class*="_composer_"]').last();
+    await expect(box).toHaveCSS("box-shadow", /^rgb\(217, 119, 87\) /);
+    // Another accent from Settings › Agents › Chat applies at once.
+    await page.evaluate(async () => {
+      const path = "/src/platform/project.ts";
+      const { useProject } = await import(path);
+      const settings = useProject.getState().settings;
+      useProject.setState({ settings: { ...settings, agents: { ...settings?.agents, chatAccent: "#6b9ff2" } } });
+    });
+    await expect(prompt).toHaveCSS("border-top-color", "rgb(107, 159, 242)");
+    await expect(box).toHaveCSS("box-shadow", /^rgb\(107, 159, 242\) /);
+    await page.evaluate(async () => {
+      const path = "/src/platform/project.ts";
+      const { useProject } = await import(path);
+      const settings = useProject.getState().settings;
+      useProject.setState({ settings: { ...settings, agents: { ...settings?.agents, chatAccent: "#d97757" } } });
+    });
+    // Hovered, its actions show inside its box (a row clips what overflows it).
+    await prompt.hover();
+    const copy = stream.locator('[class*="_userMessage_"]').first().getByRole("button", { name: "Copy" });
+    await expect(copy).toHaveCSS("opacity", "1");
+    const inside = await copy.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      const r = el.closest('[class*="_userMessage_"]')!.querySelector('[class*="_user_"]')!.getBoundingClientRect();
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return b.top >= r.top && b.right <= r.right && !!hit && el.contains(hit);
+    });
+    expect(inside).toBe(true);
+    await shot(page, `look-hover-${theme}`);
     // The agent's side is a timeline: a dot per block, by its kind and state.
     expect(layout.dots).toEqual([null, "thought", "completed", "completed", "text", "completed", "failed", null]);
     // A tool call: its name, then its argument; a command is Bash's.

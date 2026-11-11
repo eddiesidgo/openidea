@@ -104,7 +104,13 @@ pub struct AgentSettings {
     #[serde(deserialize_with = "agent_defaults")]
     #[specta(type = BTreeMap<String, BTreeMap<String, String>>)]
     pub defaults: BTreeMap<String, BTreeMap<String, String>>,
+    /// The conversation's accent (`#rrggbb`): the frame of the message box and of your
+    /// messages. The UI checks the value and falls back to the default.
+    pub chat_accent: String,
 }
+
+/// Claude's orange: the conversation's accent until another is chosen.
+pub const DEFAULT_CHAT_ACCENT: &str = "#d97757";
 
 impl Default for AgentSettings {
     fn default() -> Self {
@@ -113,14 +119,16 @@ impl Default for AgentSettings {
             show_work_time: true,
             show_usage_limits: true,
             show_cost: false,
-            fold_turns: true,
+            // Every tool call listed, finished turns left open: as in Claude Code.
+            fold_turns: false,
             smooth_text: true,
             thinking: ThinkingDisplay::Auto,
-            tool_calls: ToolCallDisplay::Grouped,
+            tool_calls: ToolCallDisplay::Each,
             expand_tool_output: false,
             send_with: SendKey::Enter,
             while_running: WhileRunning::Queue,
             defaults: BTreeMap::new(),
+            chat_accent: DEFAULT_CHAT_ACCENT.to_owned(),
         }
     }
 }
@@ -175,9 +183,9 @@ pub enum ThinkingDisplay {
 #[serde(rename_all = "camelCase")]
 pub enum ToolCallDisplay {
     /// A run of calls is one line saying what they did ("Read 4 files · Edited 2 files").
-    #[default]
     Grouped,
     /// Each call on its own line.
+    #[default]
     Each,
 }
 

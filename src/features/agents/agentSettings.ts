@@ -18,6 +18,8 @@ export const AGENT_SETTINGS_DEFAULTS: ResolvedAgentSettings = {
   sendWith: "enter",
   whileRunning: "queue",
   defaults: {},
+  // Claude's orange, as Settings' own default (the settings schema's DEFAULT_CHAT_ACCENT).
+  chatAccent: "#d97757",
 };
 
 export function resolveAgentSettings(s: AgentSettings | null | undefined): ResolvedAgentSettings {

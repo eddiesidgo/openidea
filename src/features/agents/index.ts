@@ -28,6 +28,7 @@ import { TaskStatusMark } from "./TaskStatusMark";
 import { taskActions, useAgentsHeaderMenu } from "./taskActions";
 import { replyActions } from "./replyActions";
 import { agentService } from "./agentService";
+import { followChatAccent } from "./chatAccent";
 import { TOOL_TEXT_KIND, toolTextTitle } from "./toolText";
 
 /** Settings › Agents › Coding Agents (also used by the Settings window). */
@@ -195,6 +196,7 @@ export function activate(): () => void {
     ]),
   ];
   provideAgentService(agentService);
+  disposers.push(followChatAccent());
   return () => {
     provideAgentService(undefined);
     disposers.reverse().forEach((d) => d());

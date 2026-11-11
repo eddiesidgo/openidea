@@ -1577,18 +1577,27 @@
   width: 100%;
   max-width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--agent-accent, var(--border-strong));
   border-radius: var(--radius-tab);
   background: var(--bg-input);
 }
+/* Its actions and time, on hover, inside the box's top-right corner: a row is paint-contained
+   (`content-visibility`), so anything outside its box would be cut off. */
 .userMessage > .messageHead {
   position: absolute;
-  top: calc(var(--space-2) / -2);
-  right: var(--space-2);
+  top: 3px;
+  right: 4px;
   z-index: 1;
   min-height: 0;
   margin: 0;
-  transform: translateY(-50%);
+  padding: 0 2px;
+  border-radius: var(--radius-small);
+  pointer-events: none;
+}
+.userMessage:hover > .messageHead,
+.userMessage:focus-within > .messageHead {
+  background: var(--bg-input);
+  pointer-events: auto;
 }
 
 /* The agent's side of a turn is a timeline: a dot per block, joined by a line. */

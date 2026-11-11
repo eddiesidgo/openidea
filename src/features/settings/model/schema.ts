@@ -130,6 +130,19 @@ function validateSpelling(raw: unknown): SpellingValid {
 
 export { ACCENT_PRESETS } from "@/workbench/theme";
 
+/** Claude's orange: the agent conversation's accent until another is chosen. */
+export const DEFAULT_CHAT_ACCENT = "#d97757";
+
+/** Accents offered for the agent conversation (Settings › Agents › Chat). */
+export const CHAT_ACCENT_PRESETS = [
+  { value: DEFAULT_CHAT_ACCENT, label: "Claude orange" },
+  { value: "#6b9ff2", label: "Blue" },
+  { value: "#62b583", label: "Green" },
+  { value: "#a88bf0", label: "Purple" },
+  { value: "#e27aa5", label: "Pink" },
+  { value: "#8c8f95", label: "Grey" },
+] as const;
+
 export const DEFAULT_SETTINGS: ValidSettings = {
   plugins: {},
   general: {
@@ -191,6 +204,7 @@ export const DEFAULT_SETTINGS: ValidSettings = {
     sendWith: "enter",
     whileRunning: "queue",
     defaults: {},
+    chatAccent: DEFAULT_CHAT_ACCENT,
   },
   mcpServer: { enabled: false },
   ...DEFAULT_WORKFLOW,
@@ -331,6 +345,10 @@ export function validateSettings(raw: Settings | unknown): ValidSettings {
       sendWith: oneOf(agents.sendWith, ["enter", "modEnter"] as const, d.agents.sendWith),
       whileRunning: oneOf(agents.whileRunning, ["queue", "steer"] as const, d.agents.whileRunning),
       defaults: agentDefaults(agents.defaults),
+      chatAccent:
+        typeof agents.chatAccent === "string" && HEX_COLOR.test(agents.chatAccent)
+          ? agents.chatAccent.toLowerCase()
+          : d.agents.chatAccent,
     },
     mcpServer: { enabled: bool(obj(root.mcpServer).enabled, d.mcpServer.enabled) },
     ...validateWorkflow(root),

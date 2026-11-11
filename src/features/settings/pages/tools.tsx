@@ -16,7 +16,8 @@ import {
   type ExternalToolValid,
 } from "@/platform/workflowSettings";
 import { Button, Checkbox, IconButton, Input, Menu, type SelectOption, T } from "@/ui";
-import { NumberInput, Row, SearchLabel, Section, Select } from "../components/Form";
+import { ColorSwatches, NumberInput, Row, SearchLabel, Section, Select } from "../components/Form";
+import { CHAT_ACCENT_PRESETS } from "../model/schema";
 import { useLabelMatch, useSetting } from "../components/context";
 import { selectPage, setQuery } from "../model/staging";
 import { MCP_SERVER_PAGE } from "./mcpServer";
@@ -344,6 +345,21 @@ function ActionsOnSave() {
         hint="Applies the language server's fix-all action (source.fixAll)."
       />
     </>
+  );
+}
+
+/** The conversation's accent: the frame of the message box and of your messages. */
+function ChatAccentRow() {
+  const [accent, setAccent] = useSetting<string>("agents.chatAccent");
+  return (
+    <Row label="Accent colour" hint="The frame of the message box and of the messages you sent">
+      <ColorSwatches
+        value={accent ?? CHAT_ACCENT_PRESETS[0].value}
+        presets={CHAT_ACCENT_PRESETS}
+        onChange={setAccent}
+        aria-label="Accent colour"
+      />
+    </Row>
   );
 }
 
@@ -682,6 +698,7 @@ export const TOOLS_PAGES: PageSpec[] = [
       {
         title: "Conversation",
         options: [
+          { kind: "custom", label: "Accent colour", component: ChatAccentRow },
           {
             kind: "toggle",
             key: "agents.foldTurns",

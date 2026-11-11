@@ -16,6 +16,7 @@ describe("agent chat settings", () => {
       sendWith: "enter",
       whileRunning: "queue",
       defaults: {},
+      chatAccent: "#d97757",
     });
     const stored = validateSettings({ agents: { showUsageLimits: false, showCost: true, showWorkTime: "no" } }).agents;
     expect(stored).toMatchObject({
@@ -24,6 +25,13 @@ describe("agent chat settings", () => {
       showUsageLimits: false,
       showCost: true,
     });
+  });
+
+  it("keeps a valid accent colour, lower-cased, and drops others", () => {
+    const accent = (chatAccent: unknown) => validateSettings({ agents: { chatAccent } }).agents.chatAccent;
+    expect(accent("#6B9FF2")).toBe("#6b9ff2");
+    expect(accent("#abc")).toBe("#abc");
+    for (const bad of ["orange", "#12345", "", 7, null]) expect(accent(bad)).toBe("#d97757");
   });
 
   it("keeps valid chat choices and per-agent defaults", () => {

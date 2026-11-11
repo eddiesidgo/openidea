@@ -1845,6 +1845,11 @@ export type AgentSettings_Deserialize = {
 	whileRunning?: WhileRunning,
 	/**  Settings new tasks of an agent start with: agent id → option id → value. */
 	defaults?: { [key in string]: { [key in string]: string } },
+	/**
+	 *  The conversation's accent (`#rrggbb`): the frame of the message box and of your
+	 *  messages. The UI checks the value and falls back to the default.
+	 */
+	chatAccent?: string,
 };
 
 /**  Settings › Agents: what the conversation shows and how messages are sent. */
@@ -1873,6 +1878,11 @@ export type AgentSettings_Serialize = {
 	whileRunning: WhileRunning,
 	/**  Settings new tasks of an agent start with: agent id → option id → value. */
 	defaults: { [key in string]: { [key in string]: string } },
+	/**
+	 *  The conversation's accent (`#rrggbb`): the frame of the message box and of your
+	 *  messages. The UI checks the value and falls back to the default.
+	 */
+	chatAccent: string,
 };
 
 /**  Where an agent comes from. */
