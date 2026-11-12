@@ -1856,6 +1856,14 @@ export type AgentCost = {
 	currency: string,
 };
 
+export type AgentDiffKind = "context" | "added" | "removed";
+
+/**  A line of an edit's preview, without its line break. */
+export type AgentDiffLine = {
+	kind: AgentDiffKind,
+	text: string,
+};
+
 /**  One item of a task's conversation. */
 export type AgentEntry = { type: "user"; text: string; 
 /**  Names of the files and images sent with it. */
@@ -2234,6 +2242,10 @@ export type AgentToolDiff = {
 	path: IpcPath,
 	added: number,
 	removed: number,
+	/**  The first changed lines with a little context, for the snippet shown under the edit. */
+	preview?: AgentDiffLine[],
+	/**  Changed lines the preview leaves out. */
+	hidden?: number,
 };
 
 export type AgentToolStatus = "pending" | "running" | "completed" | "failed";

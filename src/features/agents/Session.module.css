@@ -1893,3 +1893,62 @@
 .ioOpen:focus-visible {
   opacity: 1;
 }
+
+/* What an edit changed: its first lines under the tool row, red and green as in a diff. */
+.diffSnippet {
+  display: grid;
+  margin: 2px 0 4px calc(var(--space-2) / 2);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-tab);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.diffLine {
+  display: flex;
+  min-width: 0;
+  color: var(--fg-muted);
+}
+.diffSign {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.diffText {
+  min-width: 0;
+  padding-right: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.diffAdded {
+  background: color-mix(in srgb, var(--vcs-added) 16%, transparent);
+  color: var(--fg);
+}
+.diffAdded .diffSign {
+  color: var(--vcs-added);
+}
+.diffRemoved {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--fg);
+}
+.diffRemoved .diffSign {
+  color: var(--danger);
+}
+.diffMore {
+  padding: 2px 22px;
+  border: 0;
+  background: none;
+  color: var(--fg-subtle);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.diffMore:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}

@@ -738,6 +738,27 @@ describe("tool calls", () => {
     expect(screen.queryByText("Reading files…")).toBeNull();
   });
 
+  it("shows what an edit changed as a small diff under it", async () => {
+    useProject.setState({ settings: { agents: { toolCalls: "each" } } as never });
+    const preview = [
+      { kind: "context", text: "const a = 1;" },
+      { kind: "removed", text: "const b = 2;" },
+      { kind: "added", text: "const b = 3;" },
+    ] as const;
+    backend.entries.set("A", [
+      tool("edit", {
+        kind: "edit",
+        title: "Edit a.ts",
+        diffs: [{ path: "/project/a.ts", added: 1, removed: 1, preview: [...preview], hidden: 3 }],
+      }),
+    ]);
+    useAgents.setState({ entries: new Map(backend.entries) });
+    render(<SessionEditor input={input("A")} />);
+    expect((await screen.findByText("const b = 3;")).closest(`.${styles.diffLine}`)).toHaveClass(styles.diffAdded!);
+    expect(screen.getByText("const b = 2;").closest(`.${styles.diffLine}`)).toHaveClass(styles.diffRemoved!);
+    expect(screen.getByRole("button", { name: "3 more lines" })).toBeInTheDocument();
+  });
+
   it("folds consecutive finished tool calls into one collapsed row", async () => {
     const edit = (id: string) => tool(id, { kind: "edit", diffs: [{ path: "/project/a.ts", added: 2, removed: 1 }] });
     backend.entries.set("A", [edit("one"), edit("two"), { type: "agent", text: "Answer A" }]);

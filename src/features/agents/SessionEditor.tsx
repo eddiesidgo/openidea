@@ -28,6 +28,7 @@ import type {
   AgentQuestion,
   AgentRetry,
   AgentTask,
+  AgentToolDiff,
   AgentUsage,
 } from "@/bindings";
 import { executeAction } from "@/platform/actions";
@@ -1863,10 +1864,12 @@ const ToolEntry = memo(function ToolEntry({
     </>
   );
   const command = entry.kind === "execute";
+  const snippets = entry.diffs.map((d) => <DiffSnippet key={d.path} task={task} diff={d} />);
   if (!entry.output && !command)
     return (
       <div className={styles.process}>
         <div className={styles.tool}>{head}</div>
+        {snippets}
       </div>
     );
   return (
@@ -1883,9 +1886,41 @@ const ToolEntry = memo(function ToolEntry({
       >
         {command ? <CommandIO task={task} entry={entry} /> : <pre className={styles.output}>{entry.output}</pre>}
       </Fold>
+      {snippets}
     </div>
   );
 });
+
+/** What an edit changed, as a few lines right under it: the diff builds up as the agent works. */
+function DiffSnippet({ task, diff }: { task: AgentTask; diff: AgentToolDiff }) {
+  const tx = useTx();
+  const { preview = [], hidden = 0 } = diff;
+  if (!preview.length) return null;
+  return (
+    <div className={styles.diffSnippet}>
+      {preview.map((line, i) => (
+        <div
+          key={i}
+          className={clsx(
+            styles.diffLine,
+            line.kind === "added" && styles.diffAdded,
+            line.kind === "removed" && styles.diffRemoved,
+          )}
+        >
+          <span className={styles.diffSign} aria-hidden>
+            {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}
+          </span>
+          <span className={styles.diffText}>{line.text || " "}</span>
+        </div>
+      ))}
+      {hidden > 0 && (
+        <button type="button" className={styles.diffMore} onClick={() => void openChangeDiff(task, diff.path)}>
+          {tx`${hidden} more lines`}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * A command and what it printed, as Claude Code shows them: an IN and an OUT part, each

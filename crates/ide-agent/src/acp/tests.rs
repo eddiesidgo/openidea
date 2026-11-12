@@ -4,9 +4,8 @@
 use super::normalize::{Normalizer, base64};
 use super::*;
 use crate::conversation::Conversation;
-use crate::model::{AgentEntry, AgentSubagentStatus, AgentToolDiff, AgentToolStatus};
+use crate::model::{AgentEntry, AgentSubagentStatus, AgentToolStatus};
 use crate::timeline::Timeline;
-use ide_core::IpcPath;
 use ide_jsonrpc::Framing;
 use std::time::Duration;
 
@@ -282,7 +281,8 @@ fn a_captured_v2_turn_folds_into_the_timeline() {
         (title.as_str(), *status, kind.as_str()),
         ("Write /work/proj/note.txt", AgentToolStatus::Completed, "edit")
     );
-    assert_eq!(diffs, &[AgentToolDiff { path: IpcPath("/work/proj/note.txt".into()), added: 1, removed: 0 }]);
+    assert_eq!((diffs[0].path.0.to_str().unwrap(), diffs[0].added, diffs[0].removed), ("/work/proj/note.txt", 1, 0));
+    assert_eq!(diffs[0].preview.len(), 1);
     assert_eq!(e[3], AgentEntry::Agent { text: "done".into() });
 }
 

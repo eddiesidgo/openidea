@@ -269,6 +269,28 @@ pub struct AgentToolDiff {
     pub path: IpcPath,
     pub added: u32,
     pub removed: u32,
+    /// The first changed lines with a little context, for the snippet shown under the edit.
+    #[serde(default)]
+    pub preview: Vec<AgentDiffLine>,
+    /// Changed lines the preview leaves out.
+    #[serde(default)]
+    pub hidden: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentDiffKind {
+    Context,
+    Added,
+    Removed,
+}
+
+/// A line of an edit's preview, without its line break.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDiffLine {
+    pub kind: AgentDiffKind,
+    pub text: String,
 }
 
 /// What a subagent is doing, as its parent reports it.

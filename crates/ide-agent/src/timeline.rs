@@ -1,6 +1,8 @@
 //! Folds ACP `session/update` notifications into a task's entries.
 
-use crate::model::{AgentEntry, AgentPlanItem, AgentSubagentStatus, AgentToolDiff, AgentToolStatus};
+use crate::model::{
+    AgentDiffKind, AgentDiffLine, AgentEntry, AgentPlanItem, AgentSubagentStatus, AgentToolDiff, AgentToolStatus,
+};
 use ide_core::IpcPath;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -165,7 +167,14 @@ impl Timeline {
                     let old = item.get("oldText").and_then(Value::as_str).unwrap_or_default();
                     let new = item.get("newText").and_then(Value::as_str).unwrap_or_default();
                     let (added, removed) = line_stats(old, new);
-                    new_diffs.push(AgentToolDiff { path: IpcPath(str_field(item, "path").into()), added, removed });
+                    let (preview, hidden) = diff_preview(old, new);
+                    new_diffs.push(AgentToolDiff {
+                        path: IpcPath(str_field(item, "path").into()),
+                        added,
+                        removed,
+                        preview,
+                        hidden,
+                    });
                 }
                 _ => {}
             }
@@ -388,6 +397,47 @@ fn line_stats(old: &str, new: &str) -> (u32, u32) {
     ide_vcs::diff_hunks(old, new).iter().fold((0, 0), |(a, r), h| (a + h.lines, r + h.old_lines))
 }
 
+/// Lines of an edit's preview, and how wide one may be.
+const PREVIEW_LINES: usize = 14;
+const PREVIEW_WIDTH: usize = 200;
+/// Unchanged lines kept around a change.
+const PREVIEW_CONTEXT: usize = 1;
+
+/// The changed lines of `old` → `new`, each hunk with a line of context, cut to
+/// `PREVIEW_LINES`; the second value counts the lines cut.
+fn diff_preview(old: &str, new: &str) -> (Vec<AgentDiffLine>, u32) {
+    let new = new.replace("\r\n", "\n");
+    let new_lines: Vec<&str> = new.split_inclusive('\n').collect();
+    let line = |kind, text: &str| AgentDiffLine {
+        kind,
+        text: text.trim_end_matches(['\n', '\r']).chars().take(PREVIEW_WIDTH).collect(),
+    };
+    let mut out = Vec::new();
+    // The first line of `new` not shown yet.
+    let mut shown = 0;
+    for hunk in ide_vcs::diff_hunks(old, &new) {
+        let (start, end) = (hunk.start as usize, (hunk.start + hunk.lines) as usize);
+        for text in &new_lines[start.saturating_sub(PREVIEW_CONTEXT).max(shown)..start.min(new_lines.len())] {
+            out.push(line(AgentDiffKind::Context, text));
+        }
+        for text in hunk.old_text.split_inclusive('\n') {
+            out.push(line(AgentDiffKind::Removed, text));
+        }
+        for text in &new_lines[start.min(new_lines.len())..end.min(new_lines.len())] {
+            out.push(line(AgentDiffKind::Added, text));
+        }
+        shown = end;
+        // Context after it, unless the next hunk's own context is about to cover those lines.
+        for text in new_lines.iter().skip(shown).take(PREVIEW_CONTEXT) {
+            out.push(line(AgentDiffKind::Context, text));
+            shown += 1;
+        }
+    }
+    let hidden = out.len().saturating_sub(PREVIEW_LINES);
+    out.truncate(PREVIEW_LINES);
+    (out, hidden as u32)
+}
+
 fn tail(mut text: String) -> String {
     if text.len() > MAX_OUTPUT {
         let mut cut = text.len() - MAX_OUTPUT;
@@ -423,6 +473,17 @@ mod tests {
     }
 
     #[test]
+    fn a_long_edit_previews_its_first_lines_and_counts_the_rest() {
+        let new: String = (0..30).map(|i| format!("line {i}\n")).collect();
+        let (preview, hidden) = diff_preview("", &new);
+        assert_eq!(preview.len(), PREVIEW_LINES);
+        assert!(preview.iter().all(|l| l.kind == AgentDiffKind::Added));
+        assert_eq!(hidden, 30 - PREVIEW_LINES as u32);
+        let (none, hidden) = diff_preview("same\n", "same\n");
+        assert!((none.is_empty(), hidden) == (true, 0));
+    }
+
+    #[test]
     fn tool_calls_update_in_place() {
         let mut t = Timeline::default();
         t.apply(&json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Edit a.rs", "kind": "edit",
@@ -435,7 +496,17 @@ mod tests {
         assert_eq!(applied.changed, vec![0]);
         let AgentEntry::Tool { status, diffs, output, locations, .. } = &t.entries[0] else { panic!() };
         assert_eq!(*status, AgentToolStatus::Completed);
-        assert_eq!(diffs, &vec![AgentToolDiff { path: IpcPath("/p/a.rs".into()), added: 2, removed: 1 }]);
+        assert_eq!((diffs[0].added, diffs[0].removed, diffs[0].hidden), (2, 1, 0));
+        let preview: Vec<_> = diffs[0].preview.iter().map(|l| (l.kind, l.text.as_str())).collect();
+        assert_eq!(
+            preview,
+            [
+                (AgentDiffKind::Context, "a"),
+                (AgentDiffKind::Removed, "b"),
+                (AgentDiffKind::Added, "B"),
+                (AgentDiffKind::Added, "c"),
+            ]
+        );
         assert_eq!(output.as_deref(), Some("done"));
         assert_eq!(locations, &vec![IpcPath("/p/a.rs".into())]);
         // Unknown calls are ignored.
