@@ -6,7 +6,9 @@
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-popup);
-  background: var(--bg-field, var(--bg-button));
+  /* Between the theme's field colour and the panel behind it, so a theme with a much darker
+     field (One Dark Pro) doesn't leave a hole in the conversation. */
+  background: color-mix(in srgb, var(--bg-field, var(--bg-button)) 35%, var(--bg-island, var(--bg-elev)));
   /* The conversation's accent (Settings › Agents › Chat). */
   box-shadow: inset 0 0 0 1px var(--agent-accent, var(--border-button));
   cursor: text;
