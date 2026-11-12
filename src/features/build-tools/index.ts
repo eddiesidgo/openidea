@@ -35,6 +35,7 @@ import {
 import {
   ANALYZER_KIND,
   addProjects,
+  importModuleFromExistingSources,
   linkGradleProjects,
   unlinkGradleProjects,
   requestSync,
@@ -51,6 +52,7 @@ import {
   generateSources,
   syncTool,
   toggleGradleOffline,
+  toggleGradleSkipTests,
   toggleMavenOffline,
   toggleSkipTests,
   useBuild,
@@ -279,10 +281,23 @@ export function activate(): () => void {
       {
         id: "maven.addProjects",
         title: "Add Maven Projects",
+        description:
+          "Choose one or more pom.xml files inside or outside the opened project. The opened folder stays the project root.",
         category: "Maven",
         icon: "plus",
         when: "projectOpen && !workspaceOpen",
         run: () => addProjects(),
+      },
+      {
+        id: "maven.importExternal",
+        title: "Import Module from Existing Sources",
+        description:
+          "Choose a module directory outside the opened project. If it contains pom.xml, that Maven project is attached. The opened folder stays the project root, and neither POM is edited.",
+        category: "Maven",
+        icon: "plus",
+        when: "projectOpen && !workspaceOpen",
+        keywords: ["import", "module", "existing", "sources", "external", "maven", "pom"],
+        run: () => importModuleFromExistingSources(),
       },
       {
         id: "maven.unlinkProjects",
@@ -450,6 +465,17 @@ export function activate(): () => void {
         keywords: ["gradle", "offline"],
         toggled: () => useBuild.getState().settings.gradle.offline,
         run: () => toggleGradleOffline(),
+      },
+      {
+        id: "gradle.toggleSkipTests",
+        title: "Toggle 'Skip Tests' Mode",
+        description: "Runs Gradle with -x test",
+        category: "Gradle",
+        icon: "skip-tests",
+        when: GRADLE_WHEN,
+        keywords: ["gradle", "skip tests"],
+        toggled: () => useBuild.getState().settings.gradle.skipTests,
+        run: () => toggleGradleSkipTests(),
       },
       {
         id: "gradle.expandAll",

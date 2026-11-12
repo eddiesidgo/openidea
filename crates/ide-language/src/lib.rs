@@ -55,6 +55,10 @@ pub struct LanguageConfig {
     /// the first one whose root marker is found applies.
     #[serde(default)]
     pub framework_ui_modes: Vec<FrameworkUiMode>,
+    /// Files of this language in a framework's projects that their extension alone would
+    /// give to another language (Django templates are `.html` files in `templates`).
+    #[serde(default)]
+    pub framework_files: Vec<FrameworkFiles>,
     #[serde(default)]
     pub tree_sitter: Option<String>,
     #[serde(default)]
@@ -90,6 +94,18 @@ pub struct FrameworkUiMode {
     pub root_markers: Vec<String>,
 }
 
+/// Files in a framework's folder: a file with one of `extensions` below a folder named
+/// `folder`, which has a root marker in a directory above it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FrameworkFiles {
+    pub folder: String,
+    /// Without the dot, compared ignoring case.
+    pub extensions: Vec<String>,
+    /// Matched like language servers' `root-markers`, e.g. `manage.py`.
+    pub root_markers: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct IndentConfig {
@@ -117,6 +133,10 @@ pub struct LanguageServerConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Environment variables the server can't start without (PowerShell Editor
+    /// Services' `PSES_BUNDLE_PATH`): while one is unset it counts as missing.
+    #[serde(default)]
+    pub requires_env: Vec<String>,
     /// Files whose presence marks a workspace root, e.g. `Cargo.toml`;
     /// `file#table` requires the TOML file to contain that dotted table, e.g.
     /// `pyproject.toml#tool.ruff`.

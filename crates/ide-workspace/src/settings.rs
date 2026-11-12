@@ -108,6 +108,15 @@ fn try_merge(merged: &mut Json, layer: Json) -> Result<(), String> {
     // the three-state key coming from a lower-priority layer.
     let layer = normalize_navigation_bar(layer);
     let mut candidate = merged.clone();
+    // Each named MCP server in a higher layer replaces a server of the same name in a lower layer as a whole.
+    if let (Some(base_servers), Some(layer_servers)) = (
+        candidate.pointer_mut("/agents/mcpServers").and_then(Json::as_object_mut),
+        layer.pointer("/agents/mcpServers").and_then(Json::as_object),
+    ) {
+        for name in layer_servers.keys() {
+            base_servers.remove(name);
+        }
+    }
     deep_merge(&mut candidate, layer);
     serde_json::from_value::<Settings>(candidate.clone()).map_err(|e| e.to_string())?;
     *merged = candidate;
@@ -236,6 +245,22 @@ impl SettingsStore {
     /// Effective (merged) settings.
     pub fn effective(&self) -> Settings {
         self.effective.read().clone()
+    }
+
+    /// Settings defined in `scope`'s file alone (without merging the other layer).
+    pub fn layer(&self, scope: SettingsScope) -> Settings {
+        let mut merged = defaults_json();
+        if let Some(file) = self.file(scope)
+            && let Some(mut layer) = read_layer(file)
+        {
+            if scope == SettingsScope::Project {
+                remove_global_settings(&mut layer);
+            }
+            if let Err(e) = try_merge(&mut merged, layer) {
+                tracing::warn!("{} has invalid settings, ignoring it: {e}", file.display());
+            }
+        }
+        serde_json::from_value(merged).unwrap_or_default()
     }
 
     /// Sets one dotted key, e.g. `editor.fontSize`, to a JSON value in `scope`.
@@ -538,6 +563,22 @@ mod tests {
             global_only.set(SettingsScope::Project, "editor.fontSize", json!(1)).unwrap_err().kind,
             ide_core::error::ErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn set_console_log_colors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("cfg");
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&cfg).unwrap();
+        let store = SettingsStore::load(&cfg, Some(&proj));
+
+        let s = store.set(SettingsScope::Global, "console.logColors.error", json!("#ff0000")).unwrap();
+        assert_eq!(s.console.log_colors.error, "#ff0000");
+        assert!(!s.console.log_colors.enabled, "off by default");
+        let s = store.set(SettingsScope::Global, "console.logColors.enabled", json!(true)).unwrap();
+        assert!(s.console.log_colors.enabled);
+        assert_eq!(s.console.log_colors.error, "#ff0000");
     }
 
     #[test]

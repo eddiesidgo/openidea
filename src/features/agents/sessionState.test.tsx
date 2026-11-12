@@ -3,11 +3,13 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { registerActions } from "@/platform/actions";
 import { useProject } from "@/platform/project";
 import { EditorShownProvider } from "@/workbench/contributions";
-import type { AgentChange, AgentEntry, AgentTask } from "@/bindings";
+import { hideContextMenu, useContextMenuStore } from "@/ui";
+import type { AgentChange, AgentCommit, AgentEntry, AgentTask } from "@/bindings";
 import { AgentsView } from "./AgentsView";
 import { SessionEditor, conversationRows } from "./SessionEditor";
 import { entriesKey, SESSION_KIND, sessionKey, type SubagentEntry } from "./model";
 import { disconnect, useAgents } from "./store";
+import { useChangesOptions } from "./changesOptions";
 import { taskActions } from "./taskActions";
 import { replyActions } from "./replyActions";
 import { focusedSession } from "./sessionFocus";
@@ -17,10 +19,28 @@ import tagStyles from "@/ui/InlineTag.module.css";
 const backend = vi.hoisted(() => ({
   entries: new Map<string, AgentEntry[]>(),
   changes: [] as AgentChange[],
+  grouped: { uncommitted: [] as AgentChange[], commits: [] as AgentCommit[] },
+  rolledBack: [] as Array<[string, string[] | null, string | null]>,
   answers: [] as Array<[string, number, string | null]>,
   fetched: [] as string[],
   entryError: null as string | null,
   entryWait: null as Promise<void> | null,
+  external: [] as Array<{
+    provider: string;
+    sessionId: string;
+    title: string;
+    cwd: string | null;
+    updatedMs: number;
+  }>,
+  imported: [] as Array<[string, string]>,
+  externalError: null as string | null,
+  accepted: [] as Array<[string, string[] | null]>,
+  acceptedOutcome: { accepted: ["very-long-file-name.ts"], skipped: [] } as {
+    accepted: string[];
+    skipped: Array<{ path: string; reason: string }>;
+  },
+  confirmed: [] as string[],
+  confirmAnswer: true,
 }));
 vi.mock("@/platform/ipc", async (original) => ({
   ...(await original<typeof import("@/platform/ipc")>()),
@@ -34,15 +54,41 @@ vi.mock("@/platform/ipc", async (original) => ({
       return { status: "ok", data: backend.entries.get(key) ?? [] };
     },
     agentChanges: async () => ({ status: "ok", data: backend.changes }),
+    agentGroupedChanges: async () => ({ status: "ok", data: backend.grouped }),
+    agentRollbackChanges: async (task: string, paths: string[] | null, view: string | null) => {
+      backend.rolledBack.push([task, paths, view]);
+      return { status: "ok", data: null };
+    },
+    agentAcceptChanges: async (task: string, paths: string[] | null) => {
+      backend.accepted.push([task, paths]);
+      return { status: "ok", data: backend.acceptedOutcome };
+    },
     vcsBranchInfo: async () => ({ status: "ok", data: { head: "main" } }),
     agentRespond: async (task: string, permission: number, option: string | null) => {
       backend.answers.push([task, permission, option]);
       return { status: "ok", data: null };
     },
+    agentExternalSessions: async () => {
+      if (backend.externalError !== null) throw new Error(backend.externalError);
+      return { status: "ok", data: backend.external };
+    },
+    agentImportSession: async (provider: string, sessionId: string) => {
+      backend.imported.push([provider, sessionId]);
+      const found = backend.external.find((e) => e.provider === provider && e.sessionId === sessionId);
+      if (!found) throw new Error("unknown session");
+      return { status: "ok", data: { ...task("imported"), id: "imported", title: found.title, provider } };
+    },
   },
 }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
+}));
+vi.mock("@/workbench/messages", async (original) => ({
+  ...(await original<typeof import("@/workbench/messages")>()),
+  confirm: async (options: { title: string }) => {
+    backend.confirmed.push(options.title);
+    return backend.confirmAnswer;
+  },
 }));
 vi.mock("@/workbench/contributions", async (original) => ({
   ...(await original<typeof import("@/workbench/contributions")>()),
@@ -108,6 +154,7 @@ let disposeActions: () => void;
 const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
 afterEach(() => {
   disposeActions();
+  hideContextMenu();
   vi.restoreAllMocks();
   vi.useRealTimers();
   if (scrollTopDescriptor) Object.defineProperty(HTMLElement.prototype, "scrollTop", scrollTopDescriptor);
@@ -122,6 +169,17 @@ beforeEach(() => {
   disconnect();
   localStorage.clear();
   backend.changes = [];
+  backend.grouped = { uncommitted: [], commits: [] };
+  backend.rolledBack = [];
+  backend.external = [];
+  // The flat list unless a test asks for the grouped view, so counts and selections stay as before.
+  useChangesOptions.setState({ groupByCommit: false });
+  backend.imported = [];
+  backend.externalError = null;
+  backend.accepted = [];
+  backend.acceptedOutcome = { accepted: ["very-long-file-name.ts"], skipped: [] };
+  backend.confirmed = [];
+  backend.confirmAnswer = true;
   backend.entries = new Map([
     ["A", [{ type: "agent", text: "Answer A" }, subagent]],
     [entriesKey("A", "child"), [{ type: "agent", text: "Child answer" }]],
@@ -133,6 +191,8 @@ beforeEach(() => {
     homeOpen: false,
     tasks: new Map([task("A"), task("B")].map((t) => [t.id, t])),
     entries: new Map(backend.entries),
+    external: [],
+    externalError: null,
   });
 });
 
@@ -263,7 +323,7 @@ describe("process folding", () => {
     ]);
     useAgents.setState({ entries: new Map(backend.entries) });
     render(<SessionEditor input={input("A")} />);
-    const summary = await screen.findByText("Reasoning · Read 2 files");
+    const summary = await screen.findByText("Read 2 files");
     const fold = summary.closest("details")!;
     expect(fold.open).toBe(false);
     // Folded content is rendered once opened, a level at a time.
@@ -271,12 +331,13 @@ describe("process folding", () => {
       details.open = true;
       fireEvent(details, new Event("toggle"));
     };
-    expect(screen.queryByText("Reasoning")).toBeNull();
-    open(fold);
-    const thought = (await screen.findAllByText("Reasoning"))[0]!.closest("details")!;
     expect(screen.queryByText("think one")).toBeNull();
+    open(fold);
+    // A folded thought shows its first line; opening it shows the rest.
+    const thought = (await screen.findByText("think one")).closest("details")!;
+    expect(thought.open).toBe(false);
     open(thought);
-    expect(await screen.findByText("think one")).toBeInTheDocument();
+    expect(thought.querySelector(`.${styles.thoughtBody}`)).toHaveTextContent("think one");
   });
 });
 
@@ -295,7 +356,7 @@ describe("turn folding", () => {
     useAgents.setState({ entries: new Map(backend.entries) });
     render(<SessionEditor input={input("A")} />);
     await screen.findByText("Final reply");
-    const summary = screen.getByText("Reasoning · Ran 1 command · Read 1 file · 1 message");
+    const summary = screen.getByText("Ran 1 command · Read 1 file · 1 message");
     const fold = summary.closest("details")!;
     expect(fold).toHaveClass(styles.turnFold!);
     expect(fold).toHaveTextContent("12s");
@@ -323,6 +384,58 @@ describe("turn folding", () => {
     expect(stream().querySelector(`.${styles.turnFold}`)).toBeNull();
     // The turn isn't over: its latest message is no final reply yet.
     expect(stream().querySelector(`.${styles.agentMessage} > .${styles.messageFooter}`)).toBeNull();
+    // What the agent is doing ends the conversation, below its latest output.
+    const working = within(stream()).getByText("Working…").closest(`.${styles.working}`);
+    expect(stream().lastElementChild).toBe(working);
+  });
+});
+
+describe("opened runs", () => {
+  beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
+
+  it("stay open when the finished turn folds them away and is opened again", async () => {
+    const asked = {
+      type: "user",
+      text: "Question",
+      attachments: [],
+      steered: false,
+      sentMs: 1000,
+      doneMs: null,
+    } as const;
+    const setTask = (status: AgentTask["status"]) => ({
+      tasks: new Map(useAgents.getState().tasks).set("A", { ...useAgents.getState().tasks.get("A")!, status }),
+    });
+    useAgents.setState({
+      entries: new Map([["A", [asked, tool("one"), tool("two"), { type: "agent", text: "Interim" }] as AgentEntry[]]]),
+      ...setTask("running"),
+    });
+    render(<SessionEditor input={input("A")} />);
+    const toggle = (details: HTMLDetailsElement) => {
+      details.open = !details.open;
+      fireEvent(details, new Event("toggle"));
+    };
+    toggle((await screen.findByText("Read 2 files")).closest("details")!);
+    act(() =>
+      useAgents.setState({
+        entries: new Map([
+          [
+            "A",
+            [
+              { ...asked, doneMs: 9000 },
+              tool("one"),
+              tool("two"),
+              { type: "agent", text: "Interim" },
+              { type: "agent", text: "Done" },
+            ] as AgentEntry[],
+          ],
+        ]),
+        ...setTask("ready"),
+      }),
+    );
+    const turn = screen.getByText("Read 2 files · 1 message").closest("details")!;
+    expect(turn).toHaveClass(styles.turnFold!);
+    toggle(turn);
+    expect(screen.getByText("Read 2 files").closest("details")!.open).toBe(true);
   });
 });
 
@@ -366,7 +479,57 @@ describe("message tags", () => {
   });
 });
 
+describe("the conversation selection", () => {
+  const labels = () =>
+    (useContextMenuStore.getState().menu?.items ?? []).flatMap((item) => ("label" in item ? [item.label] : []));
+  const select = (node: Node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  it("offers Quote on a right-click, not as a button when the selection ends", async () => {
+    render(<SessionEditor input={input("A")} />);
+    select(await screen.findByText("Answer A"));
+    fireEvent.mouseUp(stream(), { button: 0, clientX: 120, clientY: 90 });
+    expect(screen.queryByRole("button", { name: "Quote" })).toBeNull();
+    fireEvent.contextMenu(stream(), { clientX: 120, clientY: 90 });
+    expect(labels()).toContain("Quote");
+  });
+
+  it("offers Copy alone on a right-click without a selection", async () => {
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByText("Answer A");
+    window.getSelection()!.removeAllRanges();
+    fireEvent.contextMenu(stream(), { clientX: 10, clientY: 10 });
+    expect(labels()).toEqual(["Copy"]);
+  });
+});
+
 describe("scrolling", () => {
+  it("returns to the end when the user sends a message while scrolled up", async () => {
+    const reply = { type: "agent", text: "Initial reply" } as AgentEntry;
+    useAgents.setState({ entries: new Map([["A", [reply]]]) });
+    render(<SessionEditor input={input("A")} />);
+    const el = stream();
+    let height = 1000;
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => height });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 400 });
+    el.scrollTop = 600;
+    fireEvent.scroll(el);
+    fireEvent.wheel(el, { deltaY: -200 });
+    el.scrollTop = 200;
+    fireEvent.scroll(el);
+    expect(screen.getByRole("button", { name: "Jump to Latest" })).toBeInTheDocument();
+    height = 1100;
+    const sent = { type: "user", text: "Next", attachments: [], steered: false, sentMs: 1, doneMs: null } as AgentEntry;
+    act(() => useAgents.setState({ entries: new Map([["A", [reply, sent]]]) }));
+    expect(el.scrollTop).toBe(1100);
+    expect(screen.queryByRole("button", { name: "Jump to Latest" })).toBeNull();
+  });
+
   it.each(["wheel", "touch", "ArrowUp", "PageUp", "Home", "Shift+Space"])(
     "releases following before an upward %s scroll, even within the bottom threshold",
     async (method) => {
@@ -564,22 +727,16 @@ describe("scrolling", () => {
 describe("tool calls", () => {
   beforeEach(() => useProject.setState({ settings: { agents: GROUPED } as never }));
 
-  it.each(["pending", "running"] as const)(
-    "keeps %s tools outside folds with their output expanded",
-    async (status) => {
-      backend.entries.set("A", [
-        tool("done one"),
-        tool("done two"),
-        tool("live", { status, output: "Reading files…" }),
-      ]);
-      useAgents.setState({ entries: new Map(backend.entries) });
-      render(<SessionEditor input={input("A")} />);
-      const output = await screen.findByText("Reading files…");
-      expect(output.closest("details")!.open).toBe(true);
-      expect(output.closest(`.${styles.processRun}`)).toBeNull();
-      expect(screen.getByText("Read 2 files").closest("details")!.open).toBe(false);
-    },
-  );
+  it.each(["pending", "running"] as const)("keeps %s tools in their run, named on its summary", async (status) => {
+    backend.entries.set("A", [tool("done one"), tool("done two"), tool("live", { status, output: "Reading files…" })]);
+    useAgents.setState({ entries: new Map(backend.entries) });
+    render(<SessionEditor input={input("A")} />);
+    const summary = (await screen.findByText("Read 3 files")).closest("summary")!;
+    expect(summary.closest("details")!).toHaveClass(styles.processRun!);
+    expect(summary.closest("details")!.open).toBe(false);
+    expect(summary.querySelector(`.${styles.processCurrent}`)).toHaveTextContent("live");
+    expect(screen.queryByText("Reading files…")).toBeNull();
+  });
 
   it("folds consecutive finished tool calls into one collapsed row", async () => {
     const edit = (id: string) => tool(id, { kind: "edit", diffs: [{ path: "/project/a.ts", added: 2, removed: 1 }] });
@@ -969,6 +1126,25 @@ describe("conversation loading", () => {
     expect(screen.getByText("Answer A")).toBeInTheDocument();
   });
 
+  it("reads a restored tab's conversation once the project's agents are connected", async () => {
+    // The tab is restored with the project while connecting is still under way.
+    backend.fetched = [];
+    act(() => disconnect());
+    render(<SessionEditor input={input("A")} />);
+    await act(async () => {});
+    // Connecting finishes and starts from empty caches, as connect() does.
+    act(() =>
+      useAgents.setState({
+        loaded: true,
+        tasks: new Map([task("A")].map((t) => [t.id, t])),
+        entries: new Map(),
+        entryLoads: new Map(),
+      }),
+    );
+    expect(await screen.findByText("Answer A")).toBeInTheDocument();
+    expect(backend.fetched.filter((k) => k === "A")).toHaveLength(1);
+  });
+
   it("does not apply entries after disconnecting the project", async () => {
     let finish!: () => void;
     backend.entryWait = new Promise<void>((resolve) => {
@@ -1049,20 +1225,21 @@ describe("session state across tasks and hosts", () => {
         kind: "modified",
         added: 8,
         removed: 2,
+        oldPath: null,
       },
     ];
     localStorage.setItem("openidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
     useAgents.setState({ docked: "A", sessionLocation: "toolWindow" });
     render(<AgentsView />);
     await screen.findByText("Answer A");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show changes" })).toBeEnabled());
+    await screen.findByRole("button", { name: /1 changed file/ });
     expect(screen.queryByRole("complementary", { name: "Changes" })).toBeNull();
     const markVisible = vi.spyOn(await import("./store"), "markVisible");
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const message = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(message, { target: { value: "Draft to keep" } });
     const conversation = stream();
-    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    fireEvent.click(screen.getByRole("button", { name: /1 changed file/ }));
     expect(screen.getByRole("complementary", { name: "Changes" })).toBeVisible();
     expect(screen.getByText("Answer A")).not.toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
@@ -1185,5 +1362,171 @@ describe("meters in the task header", () => {
     expect(screen.queryByText("12%")).toBeNull();
     expect(screen.queryByText("5h 19%")).toBeNull();
     expect(screen.getByText("$0.42")).toBeInTheDocument();
+  });
+});
+
+describe("sessions from other apps", () => {
+  const openHistory = async () => {
+    act(() => useAgents.setState({ docked: "A" }));
+    render(<AgentsView />);
+    fireEvent.click(screen.getByRole("button", { name: "Agent sessions" }));
+    await waitFor(() => expect(screen.getByText("Sessions from other apps")).toBeInTheDocument());
+  };
+
+  it("lists external sessions in the history popup and imports one as a task", async () => {
+    backend.external = [
+      { provider: "claude", sessionId: "abc", title: "Login fix", cwd: "/work/app", updatedMs: Date.now() },
+      { provider: "codex", sessionId: "thread-1", title: "Add tests", cwd: null, updatedMs: 0 },
+    ];
+    await openHistory();
+    expect(screen.getByText("Login fix")).toBeInTheDocument();
+    expect(screen.getByText("Add tests")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "Import" })[0]!);
+    });
+    expect(backend.imported).toEqual([["claude", "abc"]]);
+    const state = useAgents.getState();
+    expect(state.tasks.get("imported")?.title).toBe("Login fix");
+    expect(state.external.map((e) => e.sessionId)).toEqual(["thread-1"]);
+  });
+
+  it("shows listing errors instead of the section", async () => {
+    backend.externalError = "no home";
+    await openHistory();
+    expect(screen.getByText("no home")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
+  });
+});
+
+describe("accept changes", () => {
+  const worktreeChanges = () => {
+    backend.changes = [
+      {
+        path: "/project/very-long-file-name.ts",
+        relPath: "very-long-file-name.ts",
+        kind: "modified",
+        added: 8,
+        removed: 2,
+        oldPath: null,
+      },
+    ];
+    localStorage.setItem("openidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
+    useAgents.setState({
+      tasks: new Map([[task("A").id, { ...task("A"), isolation: "worktree", status: "ready" }]]),
+    });
+  };
+
+  it("copies a worktree task's changes into the checkout after confirming", async () => {
+    worktreeChanges();
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByRole("complementary", { name: "Changes" });
+    fireEvent.click(screen.getByRole("button", { name: "Accept All Changes…" }));
+    expect(backend.confirmed).toEqual(["Accept Changes"]);
+    await waitFor(() => expect(backend.accepted).toEqual([["A", null]]));
+  });
+
+  it("does nothing when the confirm dialog is dismissed", async () => {
+    worktreeChanges();
+    backend.confirmAnswer = false;
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByRole("complementary", { name: "Changes" });
+    fireEvent.click(screen.getByRole("button", { name: "Accept All Changes…" }));
+    await waitFor(() => expect(backend.confirmed).toEqual(["Accept Changes"]));
+    expect(backend.accepted).toEqual([]);
+  });
+
+  it("offers no accept action for tasks that run in the checkout", async () => {
+    backend.changes = [
+      {
+        path: "/project/very-long-file-name.ts",
+        relPath: "very-long-file-name.ts",
+        kind: "modified",
+        added: 8,
+        removed: 2,
+        oldPath: null,
+      },
+    ];
+    localStorage.setItem("openidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByRole("complementary", { name: "Changes" });
+    expect(screen.queryByRole("button", { name: /Accept .* Changes…/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Rollback All Changes…" })).toBeInTheDocument();
+  });
+});
+
+describe("grouped changes", () => {
+  const commit = (overrides: Partial<AgentCommit> = {}): AgentCommit => ({
+    id: "a".repeat(40),
+    shortId: "aaaaaaa",
+    summary: "change a",
+    message: "change a\n\nbody",
+    timeMs: 1,
+    parent: "b".repeat(40),
+    files: [],
+    ...overrides,
+  });
+  const change = (path: string): AgentChange => ({
+    path: `/project/${path}`,
+    relPath: path,
+    kind: "modified",
+    added: 1,
+    removed: 1,
+    oldPath: null,
+  });
+  const worktreeTask = () => {
+    useChangesOptions.setState({ groupByCommit: true });
+    useAgents.setState({ tasks: new Map([["A", { ...task("A"), isolation: "worktree" }]]) });
+    localStorage.setItem("openidea.agents.changesOpen.v1", JSON.stringify({ A: true }));
+  };
+
+  it("puts committed files under their commit and rolls back only the uncommitted ones", async () => {
+    backend.grouped = { uncommitted: [change("a.ts")], commits: [commit({ files: [change("b.ts")] })] };
+    worktreeTask();
+    render(<SessionEditor input={input("A")} />);
+
+    expect(await screen.findByText("Uncommitted")).toBeInTheDocument();
+    expect(screen.getByText("Committed")).toBeInTheDocument();
+    expect(screen.getByText("aaaaaaa")).toBeInTheDocument();
+    expect(screen.getByText("change a")).toBeInTheDocument();
+
+    // The commit's files show once it is expanded; selecting one is not a rollback selection.
+    const commitRow = screen.getByText("change a").closest("[data-row]")!;
+    fireEvent.mouseDown(commitRow.querySelector("[data-tree-toggle]")!);
+    expect(await screen.findByText("b.ts")).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByText("b.ts"));
+    expect(screen.getByRole("button", { name: "Rollback All Changes…" })).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByText("a.ts"));
+    expect(screen.getByRole("button", { name: "Rollback Selected Changes…" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Rollback Selected Changes…" }));
+    await waitFor(() => expect(backend.confirmed).toEqual(["Rollback Changes"]));
+    expect(backend.rolledBack).toEqual([["A", ["a.ts"], "group"]]);
+  });
+
+  it("counts only uncommitted files in the header and the tray", async () => {
+    backend.grouped = {
+      uncommitted: [change("a.ts")],
+      commits: [commit({ files: [change("b.ts"), change("c.ts")] })],
+    };
+    worktreeTask();
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByRole("complementary", { name: "Changes" });
+    expect(screen.getByRole("button", { name: /1 changed file/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1 commit/ })).toBeInTheDocument();
+  });
+
+  it("accepts the task's committed work too, not only the uncommitted files", async () => {
+    backend.grouped = { uncommitted: [], commits: [commit({ files: [change("b.ts")] })] };
+    backend.changes = [change("b.ts")];
+    worktreeTask();
+    useAgents.setState({ tasks: new Map([["A", { ...task("A"), isolation: "worktree", status: "ready" }]]) });
+    render(<SessionEditor input={input("A")} />);
+    await screen.findByText("Committed");
+
+    const accept = screen.getByRole("button", { name: "Accept All Changes…" });
+    expect(accept).toBeEnabled();
+    fireEvent.click(accept);
+    await waitFor(() => expect(backend.accepted).toEqual([["A", null]]));
   });
 });

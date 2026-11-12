@@ -19,6 +19,7 @@ export interface IssueLinkValid {
 
 export interface GitSettingsValid {
   inlineBlame: boolean;
+  showBranchInProjectView: boolean;
   executable: string;
   updateMethod: UpdateMethod;
   autoUpdateOnPushRejected: boolean;
@@ -73,12 +74,23 @@ export interface VcsSettingsValid {
   issueNavigation: IssueLinkValid[];
 }
 
+/** Mirrors `ide-core::workflow_settings::LogLevelColors` defaults. */
+export interface LogLevelColorsValid {
+  enabled: boolean;
+  error: string;
+  warn: string;
+  info: string;
+  debug: string;
+  trace: string;
+}
+
 export interface ConsoleSettingsValid {
   softWrap: boolean;
   overrideBuffer: boolean;
   bufferKb: number;
   encoding: string;
   foldPatterns: string[];
+  logColors: LogLevelColorsValid;
 }
 
 export interface DebuggerSettingsValid {
@@ -117,6 +129,7 @@ export interface TerminalSettingsValid {
   overrideIdeShortcuts: boolean;
   shellIntegration: boolean;
   highlightHyperlinks: boolean;
+  highlightSelection: boolean;
   optionAsMeta: boolean;
   escapeToEditor: boolean;
   cursorShape: CursorShape;
@@ -147,6 +160,11 @@ export interface ExternalToolValid {
   openConsole: boolean;
 }
 
+export interface AgentSecurityValid {
+  allowedCommands: string[];
+  blockedCommands: string[];
+}
+
 export interface WorkflowSettings extends RemoteSettings {
   vcs: VcsSettingsValid;
   console: ConsoleSettingsValid;
@@ -155,6 +173,7 @@ export interface WorkflowSettings extends RemoteSettings {
   terminal: TerminalSettingsValid;
   actionsOnSave: ActionsOnSaveValid;
   externalTools: ExternalToolValid[];
+  agentSecurity: AgentSecurityValid;
 }
 
 export const WORKFLOW_LIMITS = {
@@ -190,6 +209,7 @@ export const DEFAULT_WORKFLOW: WorkflowSettings = {
     historyLimit: 1000,
     git: {
       inlineBlame: false,
+      showBranchInProjectView: false,
       executable: "",
       updateMethod: "merge",
       autoUpdateOnPushRejected: false,
@@ -245,6 +265,14 @@ export const DEFAULT_WORKFLOW: WorkflowSettings = {
       "at node:internal/",
       "<frozen importlib._bootstrap",
     ],
+    logColors: {
+      enabled: false,
+      error: "var(--ansi-red)",
+      warn: "var(--ansi-yellow)",
+      info: "var(--ansi-green)",
+      debug: "var(--ansi-cyan)",
+      trace: "var(--ansi-magenta)",
+    },
   },
   debugger: {
     showOnBreakpoint: true,
@@ -274,6 +302,7 @@ export const DEFAULT_WORKFLOW: WorkflowSettings = {
     overrideIdeShortcuts: true,
     shellIntegration: true,
     highlightHyperlinks: true,
+    highlightSelection: true,
     optionAsMeta: false,
     escapeToEditor: false,
     cursorShape: "block",
@@ -287,6 +316,10 @@ export const DEFAULT_WORKFLOW: WorkflowSettings = {
   },
   actionsOnSave: { optimizeImports: false, cleanup: false },
   externalTools: [],
+  agentSecurity: {
+    allowedCommands: [],
+    blockedCommands: ["rm -rf *", "rm -rf /", "mkfs*", "dd *", ":(){ :|:& };:", "shutdown*", "reboot*"],
+  },
   ...DEFAULT_REMOTE,
 };
 
@@ -321,6 +354,7 @@ export function validateVcs(raw: unknown): VcsSettingsValid {
     historyLimit: num(v.historyLimit, d.historyLimit, L.historyLimit, true),
     git: {
       inlineBlame: bool(g.inlineBlame, d.git.inlineBlame),
+      showBranchInProjectView: bool(g.showBranchInProjectView, d.git.showBranchInProjectView),
       executable: text(g.executable, d.git.executable).trim(),
       updateMethod: oneOf(g.updateMethod, ["merge", "rebase"] as const, d.git.updateMethod),
       autoUpdateOnPushRejected: bool(g.autoUpdateOnPushRejected, d.git.autoUpdateOnPushRejected),
@@ -374,12 +408,22 @@ export function validateVcs(raw: unknown): VcsSettingsValid {
 export function validateConsole(raw: unknown): ConsoleSettingsValid {
   const d = DEFAULT_WORKFLOW.console;
   const v = obj(raw);
+  const lc = obj(v.logColors);
+  const dl = d.logColors;
   return {
     softWrap: bool(v.softWrap, d.softWrap),
     overrideBuffer: bool(v.overrideBuffer, d.overrideBuffer),
     bufferKb: num(v.bufferKb, d.bufferKb, WORKFLOW_LIMITS.bufferKb, true),
     encoding: nonEmpty(v.encoding, d.encoding),
     foldPatterns: strings(v.foldPatterns, d.foldPatterns),
+    logColors: {
+      enabled: bool(lc.enabled, dl.enabled),
+      error: nonEmpty(lc.error, dl.error),
+      warn: nonEmpty(lc.warn, dl.warn),
+      info: nonEmpty(lc.info, dl.info),
+      debug: nonEmpty(lc.debug, dl.debug),
+      trace: nonEmpty(lc.trace, dl.trace),
+    },
   };
 }
 
@@ -441,6 +485,7 @@ export function validateTerminal(raw: unknown): TerminalSettingsValid {
     overrideIdeShortcuts: bool(v.overrideIdeShortcuts, d.overrideIdeShortcuts),
     shellIntegration: bool(v.shellIntegration, d.shellIntegration),
     highlightHyperlinks: bool(v.highlightHyperlinks, d.highlightHyperlinks),
+    highlightSelection: bool(v.highlightSelection, d.highlightSelection),
     optionAsMeta: bool(v.optionAsMeta, d.optionAsMeta),
     escapeToEditor: bool(v.escapeToEditor, d.escapeToEditor),
     cursorShape: oneOf(v.cursorShape, ["block", "underline", "bar"] as const, d.cursorShape),
@@ -488,6 +533,15 @@ export function validateExternalTools(raw: unknown): ExternalToolValid[] {
   return out;
 }
 
+export function validateAgentSecurity(raw: unknown): AgentSecurityValid {
+  const v = obj(raw);
+  const d = DEFAULT_WORKFLOW.agentSecurity;
+  return {
+    allowedCommands: strings(v.allowedCommands, d.allowedCommands),
+    blockedCommands: strings(v.blockedCommands, d.blockedCommands),
+  };
+}
+
 export function validateWorkflow(raw: unknown): WorkflowSettings {
   const root = obj(raw);
   return {
@@ -498,6 +552,7 @@ export function validateWorkflow(raw: unknown): WorkflowSettings {
     terminal: validateTerminal(root.terminal),
     actionsOnSave: validateActionsOnSave(root.actionsOnSave),
     externalTools: validateExternalTools(root.externalTools),
+    agentSecurity: validateAgentSecurity(root.agentSecurity),
     ...validateRemote(root),
   };
 }

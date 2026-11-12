@@ -8,6 +8,7 @@ vi.mock("@/platform/ipc", async (original) => ({
   commands: {
     agentEntries: ipc.entries,
     agentChanges: async () => ({ status: "ok", data: [] }),
+    agentGroupedChanges: async () => ({ status: "ok", data: { uncommitted: [], commits: [] } }),
     vcsBranchInfo: async () => ({ status: "ok", data: { head: "main" } }),
   },
 }));
@@ -48,7 +49,13 @@ const task: AgentTask = {
 beforeEach(() => {
   resetMermaidForTests();
   ipc.entries.mockReset().mockResolvedValue({ status: "ok", data: entries });
-  useAgents.setState({ tasks: new Map([[task.id, task]]), entries: new Map(), composers: new Map(), focus: null });
+  useAgents.setState({
+    loaded: true,
+    tasks: new Map([[task.id, task]]),
+    entries: new Map(),
+    composers: new Map(),
+    focus: null,
+  });
 });
 
 it("redraws a diagram when the theme changes", async () => {

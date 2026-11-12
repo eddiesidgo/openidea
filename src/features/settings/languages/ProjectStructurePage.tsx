@@ -1,5 +1,5 @@
 /**
- * Settings › Project Structure (File › Project Structure…, ⌘; / Ctrl+Alt+Shift+S):
+ * File › Project Structure… (⌘; / Ctrl+Alt+Shift+S):
  * IntelliJ IDEA-style Project Structure configuration across Project, Modules
  * (Sources, Paths, Dependencies), Libraries, Facets, Artifacts, and SDKs.
  */
@@ -62,8 +62,9 @@ import { initProjectRoots, useDetectedRoots } from "@/platform/projectRoots";
 import { Row, Section } from "../components/Form";
 import { choosePath, detectSdks, useSdks, type SdkKind } from "./api";
 import { DownloadJdkDialog } from "./DownloadJdkDialog";
-import { SdkField, tildify, useDetected, useProjectSetting } from "./components";
+import { SdkField, tildify, useDetected, useJdtlsJdk, useProjectSetting } from "./components";
 import styles from "./Sdk.module.css";
+import { executeAction } from "@/platform/actions";
 import { tx } from "@/platform/i18n";
 
 export type ProjectStructureSectionId =
@@ -98,16 +99,6 @@ const ROLES: Array<{ role: FolderRole; label: string; title: string; kind: Folde
     cls: styles.testResourcesTitle!,
   },
   { role: "excluded", label: "Excluded", title: "Excluded Folders", kind: "excluded", cls: styles.excludedTitle! },
-];
-
-const SECTION_TABS: Array<{ id: ProjectStructureSectionId; label: string; icon: IconName }> = [
-  { id: "project", label: "Project", icon: "folder" },
-  { id: "modules", label: "Modules", icon: "module" },
-  { id: "dependencies", label: "Dependencies", icon: "build-dependencies" },
-  { id: "libraries", label: "Libraries", icon: "folder-library" },
-  { id: "facets", label: "Facets", icon: "file-config" },
-  { id: "artifacts", label: "Artifacts", icon: "file-archive" },
-  { id: "sdks", label: "SDKs", icon: "settings" },
 ];
 
 const PROJECT_JAVA_LEVEL_OPTIONS: SelectOption[] = JAVA_LANGUAGE_LEVELS.map((level) =>
@@ -314,6 +305,10 @@ function ProjectSection() {
   const [languageLevel, setLanguageLevel] = useProjectSetting<string>("languages.java.languageLevel");
   const [compilerOutput, setCompilerOutput] = useProjectSetting<string>("projectStructure.compilerOutput");
   const [jdtlsJdk, setJdtlsJdk] = useProjectSetting<string>("languages.java.jdtlsJdk");
+  const jdtls = useJdtlsJdk(
+    "JDK used to run the Eclipse JDT Language Server, independent of the target Project SDK.",
+    jdtlsJdk ?? "",
+  );
   const outId = useId();
 
   return (
@@ -379,10 +374,7 @@ function ProjectSection() {
         </Row>
       </Section>
       <Section title="Language Server">
-        <Row
-          label="JDK"
-          hint="JDK used to run the Eclipse JDT Language Server (jdtls 21+), independent of the target Project SDK."
-        >
+        <Row label="JDK" hint={jdtls.hint}>
           <SdkField
             kind="jdk"
             value={jdtlsJdk ?? ""}
@@ -392,6 +384,7 @@ function ProjectSection() {
             directory
             browseTitle="Select JDK Home Directory"
             aria-label="Language server JDK"
+            minJava={jdtls.minJava}
           />
         </Row>
       </Section>
@@ -622,7 +615,7 @@ export function dependencyCandidates(root: string | null, dependencies: readonly
   return out;
 }
 
-/** Settings › Project Structure › Modules › Dependencies. */
+/** Project Structure › Dependencies. */
 function ModuleDependenciesTab() {
   const workspaceProjects = useProject((s) => s.project?.workspace?.projects ?? null);
   // A workspace: every member is an equal root that picks the roots it depends on.
@@ -869,7 +862,10 @@ function ModulesSection() {
     <div className={styles.page}>
       {moduleError && (
         <div role="status" className={styles.note}>
-          <T>Select a module directory inside the project.</T>
+          <T>
+            Module overrides only apply to a directory inside the opened project. To import an existing module from
+            outside it, use Import Module from Existing Sources.
+          </T>
         </div>
       )}
       <div className={styles.splitLayout}>
@@ -877,6 +873,9 @@ function ModulesSection() {
           <div className={styles.tableToolbar}>
             <Button size="small" variant="ghost" icon="plus" onClick={() => void addModule()}>
               <T>Add Module Overrides</T>
+            </Button>
+            <Button size="small" variant="ghost" icon="plus" onClick={() => void executeAction("maven.importExternal")}>
+              <T>Import Module from Existing Sources</T>
             </Button>
             <span className={styles.spacer} />
             <IconButton
@@ -1936,6 +1935,8 @@ const NAV_GROUPS: Array<{
   },
 ];
 
+const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
+
 export function ProjectStructureDialog() {
   const open = useSettingsDialog((s) => s.projectStructureOpen);
   if (!open) return null;
@@ -1981,9 +1982,9 @@ function ProjectStructureDialogInner() {
   const onNavKeyDown = (e: React.KeyboardEvent) => {
     if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || e.altKey || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
-    const idx = SECTION_TABS.findIndex((t) => t.id === section);
-    const nextIdx = e.key === "ArrowDown" ? Math.min(SECTION_TABS.length - 1, idx + 1) : Math.max(0, idx - 1);
-    const next = SECTION_TABS[nextIdx];
+    const idx = NAV_ITEMS.findIndex((t) => t.id === section);
+    const nextIdx = e.key === "ArrowDown" ? Math.min(NAV_ITEMS.length - 1, idx + 1) : Math.max(0, idx - 1);
+    const next = NAV_ITEMS[nextIdx];
     if (next) selectProjectStructureSection(next.id);
   };
 
@@ -2058,36 +2059,5 @@ function ProjectStructureDialogInner() {
         </SettingsFormContext.Provider>
       </PageContext.Provider>
     </Dialog>
-  );
-}
-
-export function ProjectStructurePage({ initialSection = "modules" }: { initialSection?: ProjectStructureSectionId }) {
-  const [section, setSection] = useState<ProjectStructureSectionId>(initialSection);
-
-  return (
-    <div className={styles.page}>
-      <div className={styles.sectionTabs} role="tablist" aria-label={tx("Project Structure sections")}>
-        {SECTION_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            className={styles.sectionTab}
-            aria-selected={section === tab.id}
-            onClick={() => setSection(tab.id)}
-          >
-            <Icon name={tab.icon} size={14} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {section === "project" && <ProjectSection />}
-      {section === "modules" && <ModulesSection />}
-      {section === "dependencies" && <ModuleDependenciesTab />}
-      {section === "libraries" && <LibrariesSection />}
-      {section === "facets" && <FacetsSection />}
-      {section === "artifacts" && <ArtifactsSection />}
-      {section === "sdks" && <SdksSection />}
-    </div>
   );
 }

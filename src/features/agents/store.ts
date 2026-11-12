@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import type {
   AgentAccount,
+  AgentAcceptOutcome,
   AgentChange,
+  AgentChanges,
+  AgentChangesView,
   AgentCommand,
   AgentConfigOption,
   AgentEntry,
@@ -13,9 +16,11 @@ import type {
   AgentLimit,
   AgentProvider,
   AgentTask,
+  ExternalSession,
   Isolation,
 } from "@/bindings";
-import { useProject } from "@/platform/project";
+import { useChangesOptions } from "./changesOptions";
+import { basename, useProject } from "@/platform/project";
 import { defaultTaskProject } from "./project";
 import { call, commands, isTauri } from "@/platform/ipc";
 import { editorService, notifications, notifyTabTitlesChanged, toolWindowService } from "@/workbench/contributions";
@@ -24,6 +29,7 @@ import { confirm } from "@/workbench/messages";
 import {
   bypassDefaults,
   canSend,
+  cursorModelDefaults,
   emptyDraft,
   isMentioned,
   toPrompt,
@@ -75,6 +81,8 @@ interface AgentsState {
   entries: Map<string, AgentEntry[]>;
   entryLoads: Map<string, { error: string | null }>;
   changes: Map<string, AgentChange[]>;
+  /** The task's uncommitted changes and commits, when the Changes pane groups by commit. */
+  groupedChanges: Map<string, AgentChanges>;
   /** Scroll position and follow-output preference by conversation, shared by both hosts. */
   scrollPositions: Map<string, { top: number; stick: boolean }>;
   providers: AgentProvider[];
@@ -88,6 +96,10 @@ interface AgentsState {
   lastComposer: string;
   /** First messages of past tasks, newest first (New Task page ↑). */
   history: string[];
+  /** Sessions on this machine that no task holds yet (#312). */
+  external: ExternalSession[];
+  /** Why the external sessions could not be listed. */
+  externalError: string | null;
   /** The composer asked to take focus (`seq` tells repeated requests apart). */
   focus: { key: string; seq: number } | null;
   /** Task shown inside the Agents tool window instead of an editor tab. */
@@ -143,6 +155,7 @@ export const useAgents = create<AgentsState>(() => ({
   entries: new Map(),
   entryLoads: new Map(),
   changes: new Map(),
+  groupedChanges: new Map(),
   providers: [],
   limits: new Map(),
   accounts: new Map(),
@@ -150,6 +163,8 @@ export const useAgents = create<AgentsState>(() => ({
   composers: new Map(),
   lastComposer: HOME,
   history: load<string[]>(HISTORY_KEY, []),
+  external: [],
+  externalError: null,
   focus: null,
   docked: null,
   sessionLocation: load<unknown>(SESSION_LOCATION_KEY, null) === "toolWindow" ? "toolWindow" : "editor",
@@ -307,6 +322,7 @@ export async function connect(): Promise<void> {
     entries: new Map(),
     entryLoads: new Map(),
     changes: new Map(),
+    groupedChanges: new Map(),
     providers,
   });
   notifyTabTitlesChanged();
@@ -367,6 +383,7 @@ export function disconnect() {
     entries: new Map(),
     entryLoads: new Map(),
     changes: new Map(),
+    groupedChanges: new Map(),
     docked: null,
     lastTask: null,
     homeOpen: false,
@@ -521,6 +538,23 @@ export async function loadEntries(task: string, subagent: string | null = null):
 }
 
 export async function refreshChanges(task: string): Promise<void> {
+  // Local tasks have no commits of their own to group: the flat list is their only view.
+  const grouped =
+    useChangesOptions.getState().groupByCommit && useAgents.getState().tasks.get(task)?.isolation === "worktree";
+  if (grouped) {
+    try {
+      const review = await call(commands.agentGroupedChanges(task));
+      useAgents.setState((s) => ({
+        groupedChanges: new Map(s.groupedChanges).set(task, review),
+      }));
+    } catch {
+      // The worktree is gone or not a repository: nothing to list.
+      useAgents.setState((s) => ({
+        groupedChanges: new Map(s.groupedChanges).set(task, { uncommitted: [], commits: [] }),
+      }));
+    }
+    return;
+  }
   try {
     const changes = await call(commands.agentChanges(task));
     useAgents.setState((s) => ({
@@ -532,8 +566,31 @@ export async function refreshChanges(task: string): Promise<void> {
   }
 }
 
+/** Rollback: the task's changed files `relPaths` (all with `null`) back as `view` compares them. */
+export async function rollbackChanges(
+  task: string,
+  relPaths: string[] | null,
+  view: AgentChangesView = "sinceStart",
+): Promise<void> {
+  try {
+    await call(commands.agentRollbackChanges(task, relPaths, view));
+  } finally {
+    await refreshChanges(task);
+  }
+}
+
+/** Copies a worktree task's changed files into the local checkout, uncommitted. */
+export async function acceptChanges(task: string, relPaths: string[] | null): Promise<AgentAcceptOutcome> {
+  try {
+    return await call(commands.agentAcceptChanges(task, relPaths));
+  } finally {
+    await refreshChanges(task);
+  }
+}
+
 const pendingChanges = new Map<string, ReturnType<typeof setTimeout>>();
-function scheduleChanges(task: string) {
+/** Reloads the task's changes after a short pause (tool diffs, commits landing). */
+export function scheduleChanges(task: string) {
   if (pendingChanges.has(task)) return;
   pendingChanges.set(
     task,
@@ -659,6 +716,22 @@ export function openTaskInEditorLocation(task: string) {
   openTask(task);
 }
 
+/**
+ * Closes the agent task tab that is active in the editor; the task keeps running and stays in the
+ * Agents tool window. `null` when the active tab isn't an agent task, `false` when closing was cancelled.
+ */
+export function closeActiveTask(): Promise<boolean> | null {
+  const active = editorService().activeInput?.();
+  if (active?.kind !== SESSION_KIND) return null;
+  return editorService().closeInput?.(active.key) ?? Promise.resolve(false);
+}
+
+/** Close Agent Task, then the New Task page, unless closing was cancelled. */
+export async function closeAndNewTask() {
+  if ((await closeActiveTask()) === false) return;
+  openHome();
+}
+
 /** Opens the New Task page; `prompt` pre-fills it. */
 export function openHome(prompt?: string) {
   const project = useProject.getState().project;
@@ -693,7 +766,11 @@ export async function startTask(
     providers.find((p) => p.id === draft.provider),
     draft,
   );
-  const defaults = { ...bypassDefaults(options), ...providerDefaults(draft.provider) };
+  const defaults = {
+    ...cursorModelDefaults(draft.provider, options),
+    ...bypassDefaults(options),
+    ...providerDefaults(draft.provider),
+  };
   const config = options.flatMap((o) => {
     const value =
       o.category === "model" || o.category === "thought_level"
@@ -720,6 +797,26 @@ export async function startTask(
   remember(composer.text.trim());
   updateComposer(HOME, emptyDraft());
   if ((await editorService().closeInput?.(HOME_KEY)) !== false) openTask(task.id);
+}
+
+/** Sessions on this machine that no task holds yet (a terminal, another editor: #312). */
+export async function refreshExternalSessions() {
+  try {
+    const external = await call(commands.agentExternalSessions());
+    useAgents.setState({ external, externalError: null });
+  } catch (e) {
+    useAgents.setState({ externalError: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+/** Imports an external session as a task and opens it: its first turn loads it (#312). */
+export async function importExternalSession(provider: string, sessionId: string) {
+  const task = await call(commands.agentImportSession(provider, sessionId));
+  useAgents.setState((s) => ({
+    tasks: s.tasks.has(task.id) ? s.tasks : new Map(s.tasks).set(task.id, task),
+    external: s.external.filter((e) => !(e.provider === provider && e.sessionId === sessionId)),
+  }));
+  openTask(task.id);
 }
 
 function remember(text: string) {
@@ -843,8 +940,7 @@ export async function editQueued(task: string, queued: string): Promise<void> {
   const cwd = useAgents.getState().tasks.get(task)?.cwd ?? "";
   const files: FileRef[] = item.prompt.files.map((path) => {
     const rel = path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
-    // Files the text does not mention were attached with the paperclip.
-    return { path, rel, attached: !isMentioned(item.prompt.text, rel) };
+    return isMentioned(item.prompt.text, rel) ? { path, rel } : { path, rel: basename(path), attached: true };
   });
   updateComposer(task, {
     text: current.text ? `${item.prompt.text}\n${current.text}` : item.prompt.text,

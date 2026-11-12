@@ -2637,7 +2637,6 @@ version = "1.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "337d46834ee672ab3e48caca2cb0c78cc174fb12b3a68d0d88f99a0519a5e36e"
 dependencies = [
- "generic-array 0.14.7",
  "rustversion",
  "typenum",
 ]
@@ -4145,7 +4144,7 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "ide-agent"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
  "encoding_rs",
@@ -4169,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "ide-analysis"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ast-grep-core",
  "ide-core",
@@ -4183,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "ide-android"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "serde",
@@ -4194,7 +4193,7 @@ dependencies = [
 
 [[package]]
 name = "ide-build"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "chardetng",
@@ -4212,7 +4211,7 @@ dependencies = [
 
 [[package]]
 name = "ide-cli"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dirs 6.0.0",
  "serde",
@@ -4226,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "ide-clipboard"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "gtk",
  "objc2 0.6.5",
@@ -4236,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "ide-core"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
  "encoding_rs",
@@ -4253,7 +4252,7 @@ dependencies = [
 
 [[package]]
 name = "ide-coverage"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "ide-run",
@@ -4267,15 +4266,20 @@ dependencies = [
 
 [[package]]
 name = "ide-dap"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "futures",
  "ide-core",
+ "ide-heap",
+ "ide-jdwp",
  "ide-jsonrpc",
+ "ide-jvm-attach",
+ "ide-jvm-inspect",
  "ide-language",
  "libc",
  "memchr",
  "parking_lot",
+ "percent-encoding",
  "portable-pty",
  "serde",
  "serde_json",
@@ -4288,7 +4292,7 @@ dependencies = [
 
 [[package]]
 name = "ide-db"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "bb8",
  "blake3",
@@ -4298,6 +4302,7 @@ dependencies = [
  "ide-core",
  "ide-http",
  "ide-ssh",
+ "notify",
  "oracledb",
  "parking_lot",
  "reqwest",
@@ -4318,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "ide-docker"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "serde",
@@ -4331,7 +4336,7 @@ dependencies = [
 
 [[package]]
 name = "ide-extension"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -4352,7 +4357,7 @@ dependencies = [
 
 [[package]]
 name = "ide-fonts"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "objc2-core-foundation",
  "objc2-core-text",
@@ -4364,7 +4369,7 @@ dependencies = [
 
 [[package]]
 name = "ide-github"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "ide-vcs",
@@ -4376,8 +4381,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide-heap"
+version = "0.1.43"
+dependencies = [
+ "criterion",
+ "ide-core",
+ "libc",
+ "memmap2",
+ "proptest",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ide-host"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -4397,9 +4420,11 @@ dependencies = [
  "ide-db",
  "ide-docker",
  "ide-extension",
+ "ide-heap",
  "ide-http",
  "ide-index",
  "ide-jsonrpc",
+ "ide-jvm-attach",
  "ide-language",
  "ide-lsp",
  "ide-mcp",
@@ -4407,6 +4432,7 @@ dependencies = [
  "ide-plugin",
  "ide-remote",
  "ide-run",
+ "ide-scaffold",
  "ide-sdk",
  "ide-search",
  "ide-spell",
@@ -4417,6 +4443,7 @@ dependencies = [
  "ide-tools",
  "ide-vcs",
  "ide-vfs",
+ "ide-web",
  "ide-workspace",
  "ignore",
  "jsonschema",
@@ -4433,6 +4460,7 @@ dependencies = [
  "specta-typescript",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
@@ -4443,9 +4471,10 @@ dependencies = [
 
 [[package]]
 name = "ide-http"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
+ "ide-vfs",
  "parking_lot",
  "reqwest",
  "rustls",
@@ -4461,7 +4490,7 @@ dependencies = [
 
 [[package]]
 name = "ide-index"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "criterion",
@@ -4482,8 +4511,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide-jdwp"
+version = "0.1.43"
+dependencies = [
+ "ide-jvm-inspect",
+ "proptest",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ide-jsonrpc"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "encoding_rs",
  "futures",
@@ -4499,8 +4540,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide-jvm-attach"
+version = "0.1.43"
+dependencies = [
+ "libc",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "ide-jvm-inspect"
+version = "0.1.43"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "specta",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ide-language"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "criterion",
@@ -4541,6 +4602,7 @@ dependencies = [
  "tree-sitter-nix",
  "tree-sitter-ocaml",
  "tree-sitter-php",
+ "tree-sitter-prisma-io",
  "tree-sitter-proto",
  "tree-sitter-python",
  "tree-sitter-ruby",
@@ -4556,13 +4618,15 @@ dependencies = [
 
 [[package]]
 name = "ide-lsp"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
+ "encoding_rs",
  "futures",
  "globset",
  "ide-core",
  "ide-jsonrpc",
+ "ide-jvm-inspect",
  "ide-language",
  "ide-text",
  "ide-vfs",
@@ -4582,7 +4646,7 @@ dependencies = [
 
 [[package]]
 name = "ide-mcp"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "bytes",
  "dunce",
@@ -4601,7 +4665,7 @@ dependencies = [
 
 [[package]]
 name = "ide-notebook"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "futures",
  "ide-core",
@@ -4624,7 +4688,7 @@ dependencies = [
 
 [[package]]
 name = "ide-plugin"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "dunce",
@@ -4647,9 +4711,10 @@ dependencies = [
 
 [[package]]
 name = "ide-profiler"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
+ "ide-jvm-attach",
  "ide-run",
  "serde",
  "serde_json",
@@ -4660,9 +4725,10 @@ dependencies = [
 
 [[package]]
 name = "ide-remote"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
+ "futures",
  "globset",
  "ide-core",
  "ide-run",
@@ -4679,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "ide-run"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
  "encoding_rs",
@@ -4702,8 +4768,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ide-scaffold"
+version = "0.1.43"
+dependencies = [
+ "ide-core",
+ "ide-tools",
+ "ide-vcs",
+ "insta",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+]
+
+[[package]]
 name = "ide-sdk"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dunce",
  "ide-core",
@@ -4718,14 +4800,16 @@ dependencies = [
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
+ "url",
  "zip",
 ]
 
 [[package]]
 name = "ide-search"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "criterion",
+ "encoding_rs",
  "globset",
  "grep-matcher",
  "grep-regex",
@@ -4743,7 +4827,7 @@ dependencies = [
 
 [[package]]
 name = "ide-spell"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "parking_lot",
@@ -4756,7 +4840,7 @@ dependencies = [
 
 [[package]]
 name = "ide-ssh"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "dirs 6.0.0",
  "flate2",
@@ -4766,18 +4850,22 @@ dependencies = [
  "parking_lot",
  "russh",
  "russh-sftp",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "specta",
+ "suppaftp",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "ide-syntax"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "ide-language",
@@ -4792,7 +4880,7 @@ dependencies = [
 
 [[package]]
 name = "ide-terminal"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "ide-core",
  "libc",
@@ -4805,7 +4893,7 @@ dependencies = [
 
 [[package]]
 name = "ide-text"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "criterion",
  "ide-core",
@@ -4818,7 +4906,7 @@ dependencies = [
 
 [[package]]
 name = "ide-tools"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "flate2",
  "hex",
@@ -4839,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "ide-vcs"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "dunce",
@@ -4860,7 +4948,7 @@ dependencies = [
 
 [[package]]
 name = "ide-vfs"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "chardetng",
  "dunce",
@@ -4884,11 +4972,11 @@ dependencies = [
 
 [[package]]
 name = "ide-web"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
+ "dirs 6.0.0",
  "ide-core",
  "open",
- "parking_lot",
  "percent-encoding",
  "serde",
  "specta",
@@ -4900,7 +4988,7 @@ dependencies = [
 
 [[package]]
 name = "ide-workspace"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "blake3",
  "dunce",
@@ -5467,6 +5555,29 @@ checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
 dependencies = [
  "bitflags 2.13.2",
  "libc",
+]
+
+[[package]]
+name = "lazy-regex"
+version = "3.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0a2cce8a22920a29fdcc8c9170aa5d29edd9fbcf8bea856e24c2cb1c2419f67"
+dependencies = [
+ "lazy-regex-proc_macros",
+ "once_cell",
+ "regex",
+]
+
+[[package]]
+name = "lazy-regex-proc_macros"
+version = "3.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f1e4b1f1d8c71edb4ff2b2150ec4606445fd2ddf67ddc097655daf59286baa6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -6478,7 +6589,7 @@ dependencies = [
 
 [[package]]
 name = "openidea"
-version = "0.1.40"
+version = "0.1.43"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -6512,6 +6623,7 @@ dependencies = [
  "ide-profiler",
  "ide-remote",
  "ide-run",
+ "ide-scaffold",
  "ide-sdk",
  "ide-search",
  "ide-spell",
@@ -6832,6 +6944,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -7582,9 +7714,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.64.1"
+version = "0.65.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba61e87b9ec9a39a59a6bbed4c0b8ff7fb07073405b24a767a1f2c8560ac8f58"
+checksum = "94be3d86c71b9ed220a675c405e35c7a02565a009bf8da2e9cc13a700320a5c5"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
@@ -7718,9 +7850,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -8883,6 +9015,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "suppaftp"
+version = "12.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b58fcf921745cca6f0127c9f822069947da8c6dbeff52e9004750bcc448171f"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "lazy-regex",
+ "log",
+ "pin-project",
+ "rustls-pki-types",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "swift-rs"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9490,7 +9639,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -9722,7 +9871,10 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -10289,6 +10441,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-prisma-io"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c35912d65a6adb07f781db46d843bf0464935e267da6ed192705516adafc7c24"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-proto"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10416,6 +10578,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1 0.10.7",
  "thiserror 2.0.21",
  "utf-8",

@@ -13,7 +13,7 @@ use ide_vfs::Watcher;
 use ide_workspace::documents::DocumentObserver;
 use ide_workspace::{DocumentInfo, Documents, FileMoves, LocalHistory, ProjectRoots, SettingsStore, SourceFolder};
 use parking_lot::{Mutex, RwLock};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +50,8 @@ pub struct Project {
     pub cache_dir: PathBuf,
     /// Superseded launch snapshots retained until this project session ends.
     pub(crate) java_launch_snapshots: Mutex<crate::ops::java::cache::Session>,
+    /// Reasons this window was already told why Kotlin is debugged with kotlin-debug-adapter.
+    pub(crate) kotlin_debug_notices: Mutex<HashSet<&'static str>>,
     /// Database tool window: data sources and their connections.
     pub db: Arc<ide_db::DbManager>,
     /// HTTP Client responses (IDEA's `.idea/httpRequests`), in the app data dir.
@@ -67,6 +69,8 @@ pub struct Project {
     /// watchers for (a virtualenv elsewhere, a path dependency).
     lsp_watchers: Mutex<Vec<(PathBuf, Watcher)>>,
     pub(crate) _scratch_watcher: Option<Watcher>,
+    /// Picks up data sources edited on disk outside the Database tool window.
+    _db_sources_watch: Option<ide_db::SourcesWatch>,
     /// A LightEdit window's loose files ([`Host::open_light`]): global settings only,
     /// nothing indexed, no language servers, repositories or project services.
     pub light: bool,
@@ -138,6 +142,10 @@ impl Host {
         crate::plugins::injections::configure_lsp(&lsp);
         lsp.set_execution_allowed(trusted.load(Ordering::Acquire));
         lsp.set_content_roots(extra_roots.clone());
+        lsp.set_jdtls_import_roots(ide_build::maven_external_roots(
+            &root,
+            &settings.effective().languages.java.maven.linked_projects,
+        ));
         let settings = Arc::new(settings);
         {
             let settings = settings.clone();
@@ -210,6 +218,7 @@ impl Host {
                     let bundles: Vec<PathBuf> = ide_tools::managed_bundle(&data_dir, "java-debug")
                         .into_iter()
                         .chain(ide_sdk::java::usages_bundle(&data_dir))
+                        .chain(ide_sdk::java::jvm_inspect_bundle(&data_dir))
                         .chain(ide_sdk::java::kotlin_bridge_bundle(&data_dir))
                         .collect();
                     let min_java = ide_sdk::java::jdtls_min_java(cfg);
@@ -245,6 +254,7 @@ impl Host {
                         &bundles,
                         lombok.jar(),
                     );
+                    ide_sdk::apply::configure_gradle_runtime(cfg, root, server_root, &effective);
                     ide_sdk::jdtls::launch_directly(cfg);
                 }
                 ide_sdk::apply::server_protocol_overrides(cfg, &effective);
@@ -531,11 +541,13 @@ impl Host {
         mark("git");
         tracing::info!("opened {} in window {window} in {} ms {laps:?}", root.display(), started.elapsed().as_millis());
 
-        let (db, http_history, agents) = self.project_services(&root, &project_key);
+        let (db, http_history, agents) = self.project_services(&root, &project_key, &settings);
+        let db_sources_watch = db_sources_watch(&db, &sink, &self.runtime);
         let notebooks = crate::notebook::NotebookService::new(
             self.local_data_dir.join("notebook-runtime").join(uuid::Uuid::new_v4().to_string()),
             sink.clone(),
         );
+        notebooks.set_observer(Arc::new(NotebookLspObserver(lsp.clone())));
         ide_agent::registry::maintain(crate::ops::agent::registry_paths(self));
         let plugin_diagnostics =
             crate::plugins::diagnostics::Diagnostics::new(sink.clone(), self.runtime.clone(), &documents, &root);
@@ -561,6 +573,7 @@ impl Host {
             java_launch_snapshots: Mutex::new(crate::ops::java::cache::Session::new(
                 self.local_data_dir.join("cache").join(&project_key).join("build"),
             )),
+            kotlin_debug_notices: Mutex::default(),
             db,
             http_history,
             agents,
@@ -571,6 +584,7 @@ impl Host {
             content_watchers: Mutex::new(content_watchers),
             lsp_watchers: Mutex::new(Vec::new()),
             _scratch_watcher: scratch_watcher,
+            _db_sources_watch: db_sources_watch,
             files_events_active,
             light: false,
         });
@@ -594,6 +608,12 @@ impl Host {
                 weak.upgrade().map(|p| p.exclude_globs()).unwrap_or_default()
             }));
         }
+        {
+            let weak = Arc::downgrade(&project);
+            project.agents.set_security_hook(Arc::new(move || {
+                weak.upgrade().map(|p| p.settings.effective().agent_security).unwrap_or_default()
+            }));
+        }
         self.insert_project(window, project.clone());
         project.lsp.prewarm_java_configuration();
         if let Some(bridge) = &project.kotlin_bridge {
@@ -613,6 +633,7 @@ impl Host {
         &self,
         root: &Path,
         project_key: &str,
+        settings: &Arc<SettingsStore>,
     ) -> (Arc<ide_db::DbManager>, Arc<ide_http::History>, Arc<ide_agent::AgentManager>) {
         let db = Arc::new(
             ide_db::DbManager::new(
@@ -642,6 +663,10 @@ impl Host {
             },
             self.runtime.clone(),
         ));
+        let settings = settings.clone();
+        agents.set_mcp_servers_hook(Box::new(move || {
+            ide_agent::mcp::servers_from_settings(&Default::default(), &settings.effective().agents.mcp_servers)
+        }));
         (db, http_history, agents)
     }
 }
@@ -683,7 +708,7 @@ impl Host {
         documents.add_observer(Arc::new(HistoryObserver(history.clone())));
         let watcher = light_watcher(&dir, &sink, &documents, &history)?;
         let project_key = project_key(&dir);
-        let (db, http_history, agents) = self.project_services(&dir, &project_key);
+        let (db, http_history, agents) = self.project_services(&dir, &project_key, &settings);
         let notebooks = crate::notebook::NotebookService::new(
             self.local_data_dir.join("notebook-runtime").join(uuid::Uuid::new_v4().to_string()),
             sink.clone(),
@@ -711,6 +736,7 @@ impl Host {
             java_launch_snapshots: Mutex::new(crate::ops::java::cache::Session::new(
                 self.local_data_dir.join("cache").join(&project_key).join("build"),
             )),
+            kotlin_debug_notices: Mutex::default(),
             db,
             http_history,
             agents,
@@ -721,6 +747,7 @@ impl Host {
             content_watchers: Mutex::new(Vec::new()),
             lsp_watchers: Mutex::new(Vec::new()),
             _scratch_watcher: None,
+            _db_sources_watch: None,
             files_events_active: Arc::new(AtomicBool::new(false)),
             light: true,
             root: dir,
@@ -771,6 +798,28 @@ fn documents(sink: &SharedSink, languages: &Arc<LanguageRegistry>, root: Option<
                 modes.framework_ui_mode(lang, p, root.as_deref())
             })),
     )
+}
+
+/// Data sources edited on disk outside the Database tool window (by hand, by a coding
+/// agent): connections made with the old settings close and the tree re-reads them,
+/// without reopening the project.
+fn db_sources_watch(
+    db: &Arc<ide_db::DbManager>,
+    sink: &SharedSink,
+    runtime: &tokio::runtime::Handle,
+) -> Option<ide_db::SourcesWatch> {
+    let (weak, sink, runtime) = (Arc::downgrade(db), sink.clone(), runtime.clone());
+    db.watch_sources(Box::new(move || {
+        let Some(db) = weak.upgrade() else { return };
+        let sink = sink.clone();
+        runtime.spawn(async move {
+            if db.reconcile_sources().await {
+                sink.emit(IdeEvent::DbSourcesChanged);
+            }
+        });
+    }))
+    .inspect_err(|e| tracing::warn!("{}", e.message))
+    .ok()
 }
 
 fn light_watcher(
@@ -1075,6 +1124,10 @@ impl Project {
         }
         let (roots, excludes) = (self.content_roots(), self.exclude_globs());
         self.lsp.set_content_roots(roots.clone());
+        self.lsp.set_jdtls_import_roots(ide_build::maven_external_roots(
+            &self.root,
+            &self.settings.effective().languages.java.maven.linked_projects,
+        ));
         self.index.set_scope(index_roots(&self.root, roots.clone()), excludes.clone());
         self.watcher.set_excludes(&excludes);
         let mut watchers = self.content_watchers.lock();
@@ -1181,8 +1234,22 @@ fn index_roots(root: &Path, folders: Vec<PathBuf>) -> ide_index::IndexRoots {
     ide_index::IndexRoots { include_root: !container, folders: folders.into_iter().filter(|p| p != root).collect() }
 }
 
-/// Workspace members in manifest order, or extra Project Structure directories and the
-/// Gradle project folders outside the project as of the last sync (`build_cache`).
+/// The member roots of an explicit workspace container (empty for a plain
+/// project): how the editor and the language servers resolve a file's own
+/// project in a project window group. Also the roots the plugin surface may
+/// reach into — see `plugins::api`.
+pub(crate) fn workspace_member_roots(root: &Path) -> Vec<PathBuf> {
+    ide_workspace::workspace::Workspace::load(root)
+        .ok()
+        .flatten()
+        .filter(|w| w.is_container(root))
+        .map(|w| w.projects)
+        .unwrap_or_default()
+}
+
+/// Workspace members in manifest order, or extra Project Structure directories, Gradle
+/// project folders outside the project, and directories of Maven POMs linked from
+/// outside it (`build_cache` is the Gradle sync cache).
 fn content_roots(settings: &ide_core::settings::Settings, root: &Path, build_cache: &Path) -> Vec<PathBuf> {
     if let Ok(Some(workspace)) = ide_workspace::workspace::Workspace::load(root) {
         if workspace.is_container(root) {
@@ -1201,7 +1268,7 @@ fn content_roots(settings: &ide_core::settings::Settings, root: &Path, build_cac
 
 /// The roots a file may navigate into: its own root (the workspace member containing it, or
 /// the project root) plus that root's configured dependencies. A workspace member depends
-/// only on the roots picked per member in Settings › Project Structure › Dependencies —
+/// only on the roots picked per member in Project Structure › Dependencies —
 /// being attached to the workspace never makes its code navigable by itself.
 /// Cached navigation roots per (project, file), with the instant they were computed.
 type NavigationRootsCache = HashMap<(PathBuf, PathBuf), (Instant, Vec<PathBuf>)>;
@@ -1274,7 +1341,10 @@ fn extra_content_roots(settings: &ide_core::settings::Settings, root: &Path, bui
         .iter()
         .chain(settings.project_structure.dependencies.iter())
         .map(|r| PathBuf::from(r.trim()));
-    for p in user.chain(ide_build::gradle_external_roots(root, build_cache, &settings.languages.java.gradle)) {
+    for p in user
+        .chain(ide_build::gradle_external_roots(root, build_cache, &settings.languages.java.gradle))
+        .chain(ide_build::maven_external_roots(root, &settings.languages.java.maven.linked_projects))
+    {
         if p.is_absolute() && p.is_dir() && !p.starts_with(root) && !out.contains(&p) {
             out.push(p);
         }
@@ -1548,6 +1618,25 @@ impl DocumentObserver for LspObserver {
     }
 }
 
+/// Feeds the code cells of open notebooks to the Python language servers that sync notebooks.
+struct NotebookLspObserver(Arc<LspManager>);
+
+impl crate::notebook::NotebookObserver for NotebookLspObserver {
+    fn changed(&self, path: &Path, snapshot: &ide_notebook::NotebookSnapshot) {
+        let cells: Vec<ide_lsp::NotebookCell> = snapshot
+            .cells
+            .iter()
+            .filter(|c| c.cell_type == "code")
+            .map(|c| ide_lsp::NotebookCell { id: c.id.clone(), source: c.source.clone() })
+            .collect();
+        // Notebooks run Python kernels only.
+        self.0.sync_notebook(path, &LanguageId::new("python"), &cells);
+    }
+    fn closed(&self, path: &Path) {
+        self.0.close_notebook(path);
+    }
+}
+
 /// Feeds document edits into the per-project syntax tree cache.
 struct SyntaxObserver(Arc<SyntaxCache>);
 
@@ -1689,6 +1778,26 @@ mod maven_linkage_tests {
         // The whole reactor unlinked: the import exclusions are enough.
         settings.languages.java.maven.unlinked_projects = vec!["pom.xml".into()];
         assert_eq!(super::jdtls_maven_import(root, &settings).1, None);
+    }
+
+    #[test]
+    fn external_maven_link_is_a_content_root_and_not_its_sibling_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let a = base.join("A");
+        let b = base.join("B");
+        let c = base.join("C");
+        for dir in [&a, &b, &c] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("pom.xml"), "<project/>").unwrap();
+        }
+        let mut settings = ide_core::settings::Settings::default();
+        settings.languages.java.maven.linked_projects = vec!["../B/pom.xml".into()];
+        assert_eq!(super::content_roots(&settings, &a, &base.join("cache")), vec![b]);
+        // External links must not replace jdtls's scan of the opened root with a build-file list.
+        assert_eq!(super::jdtls_maven_import(&a, &settings), (Vec::new(), None));
+        settings.languages.java.maven.linked_projects.clear();
+        assert!(super::content_roots(&settings, &a, &base.join("cache")).is_empty());
     }
 
     #[test]

@@ -20,6 +20,7 @@ export const AGENT_SETTINGS_DEFAULTS: ResolvedAgentSettings = {
   defaults: {},
   // Claude's orange, as Settings' own default (the settings schema's DEFAULT_CHAT_ACCENT).
   chatAccent: "#d97757",
+  mcpServers: {},
 };
 
 export function resolveAgentSettings(s: AgentSettings | null | undefined): ResolvedAgentSettings {

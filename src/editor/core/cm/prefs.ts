@@ -50,10 +50,12 @@ import {
 } from "./editing";
 import { enterInLineComment, lineCommentStyle, type LineCommentStyle } from "./comments";
 import { enterInDocComment } from "./docComment";
-import { skipClosingQuote, smartBackspace, smartBackspaceApplies, tabOut } from "./smartKeys";
+import { renderDocComments } from "./renderedDocs";
+import { skipClosingQuote, smartAngleBrackets, smartBackspace, smartBackspaceApplies, tabOut } from "./smartKeys";
 import { stringClipboard } from "./stringClipboard";
 import { filterCopiedText } from "./clipboard";
 import { LINE_INSET } from "./lineInset";
+import { codeLensPositions } from "./codeLens";
 
 // --- soft wraps ---------------------------------------------------------------
 
@@ -484,6 +486,8 @@ export interface PrefsOptions {
   softWrap: boolean | undefined;
   /** Soft wraps toggled for the file, overriding `softWrap` and the file patterns. */
   wrapOverride?: boolean | null;
+  /** Rendered doc comments toggled for the file, overriding `appearance.renderDocComments`. */
+  renderedDocsOverride?: boolean | null;
   showWhitespace: boolean | undefined;
   /** Hard wrap column for this file's language. */
   hardWrapAt: number;
@@ -557,7 +561,12 @@ export function prefsExtension(o: PrefsOptions): Extension {
   const { prefs } = o;
   const g = prefs.general;
   const k = prefs.smartKeys;
-  const out: Extension[] = [];
+  const out: Extension[] = [
+    codeLensPositions.of({
+      usages: prefs.inlay.codeVisionUsagesPosition,
+      author: prefs.inlay.codeVisionAuthorPosition,
+    }),
+  ];
   if (!o.readOnly)
     out.push(markdownImages({ path: o.path, folder: g.markdownImageFolder, pattern: g.markdownImageNamePattern }));
   if (g.scrollPastEnd) out.push(scrollPastEnd());
@@ -572,6 +581,7 @@ export function prefsExtension(o: PrefsOptions): Extension {
     out.push(marginGuides([o.hardWrapAt, ...prefs.codeStyle.visualGuides]));
   if (prefs.appearance.methodSeparators)
     out.push(EditorView.editorAttributes.of({ class: "cm-openidea-methodSeparators" }));
+  if (o.renderedDocsOverride ?? prefs.appearance.renderDocComments) out.push(renderDocComments.of(true));
   const hidden = GUTTER_ICON_GROUPS.filter(
     (grp) => !prefs.showGutterIcons || prefs.gutterIconsDisabled.includes(grp.id),
   );
@@ -590,6 +600,8 @@ export function prefsExtension(o: PrefsOptions): Extension {
   // Pairing: closeBrackets() reads the brackets list from language data; ours comes first.
   const brackets = [...(k.pairBrackets ? ["(", "[", "{"] : []), ...(k.pairQuotes ? ["'", '"'] : [])];
   out.push(Prec.highest(EditorState.languageData.of(() => [{ closeBrackets: { brackets } }])));
+  // `<` pairs where the syntax says a generic type list starts, as in IDEA — no separate option.
+  if (k.pairBrackets && !o.readOnly) out.push(smartAngleBrackets(o.language));
   if (!k.surroundSelection) out.push(Prec.highest(noSurround));
   if (k.pairQuotes) out.push(Prec.highest(skipClosingQuote));
   if (k.tabOutOfPair) out.push(tabOut);

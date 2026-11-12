@@ -95,6 +95,27 @@ it("reports the first rejection when startup then times out", () => {
   expect(details).not.toContain("later rejection");
 });
 
+it("counts the startup timeout only while the window shows", () => {
+  const hidden = (value: boolean) => {
+    Object.defineProperty(document, "hidden", { configurable: true, value });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  try {
+    vi.advanceTimersByTime(20_000);
+    // Behind another window: no frames, so the splash can't finish; that isn't a failure.
+    hidden(true);
+    vi.advanceTimersByTime(60_000);
+    expect(document.getElementById("boot-error")).toBeNull();
+    hidden(false);
+    vi.advanceTimersByTime(9_000);
+    expect(document.getElementById("boot-error")).toBeNull();
+    vi.advanceTimersByTime(1_000);
+    expect(document.querySelector("textarea")?.value).toContain("Startup did not finish within 30 seconds.");
+  } finally {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+  }
+});
+
 it("preserves the first failure", () => {
   window.dispatchEvent(new ErrorEvent("error", { error: new Error("startup failed") }));
   window.dispatchEvent(new ErrorEvent("error", { message: "later failure" }));
@@ -189,4 +210,27 @@ it("preserves Safari error messages when its stack only lists locations", () => 
   window.dispatchEvent(new ErrorEvent("error", { error }));
   expect(document.querySelector("textarea")?.value).toContain("SyntaxError: Unsupported regular expression");
   expect(document.querySelector("textarea")?.value).toContain(error.stack);
+});
+
+it("names an outdated system web engine as the cause", () => {
+  const supports = vi.fn(() => false);
+  vi.stubGlobal("CSS", { supports });
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  );
+  window.dispatchEvent(new ErrorEvent("error", { error: new SyntaxError("Unexpected token '.'") }));
+  const hint = document.querySelector("#boot-error p")?.textContent;
+  expect(supports).toHaveBeenCalledWith("container-type", "inline-size");
+  expect(hint).toContain("needs Safari 16 or later");
+  expect(hint).toContain("Software Update");
+  vi.unstubAllGlobals();
+});
+
+it("keeps the plain report hint on a current engine", () => {
+  vi.stubGlobal("CSS", { supports: () => true });
+  window.dispatchEvent(new ErrorEvent("error", { error: new Error("startup failed") }));
+  expect(document.querySelector("#boot-error p")?.textContent).toBe(
+    "Copy the details below and include them in a GitHub issue.",
+  );
+  vi.unstubAllGlobals();
 });

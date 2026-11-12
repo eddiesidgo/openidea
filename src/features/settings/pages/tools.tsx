@@ -128,7 +128,7 @@ function ShellPathRow() {
     void commands.termAvailableShells().then(setShells, () => undefined);
   }, []);
   const browse = async () => {
-    const { open: pick } = await import("@tauri-apps/plugin-dialog");
+    const { open: pick } = await import("@/platform/dialog");
     const picked = await pick({ multiple: false, title: "Shell Path" });
     const path = Array.isArray(picked) ? picked[0] : picked;
     if (path) set(quotePath(path));
@@ -239,6 +239,7 @@ function TerminalOptions() {
           />
           <BoundToggle k="terminal.shellIntegration" label="Shell integration" />
           <BoundToggle k="terminal.highlightHyperlinks" label="Highlight hyperlinks" />
+          <BoundToggle k="terminal.highlightSelection" label="Highlight occurrences of selected text" />
           {isMac && <BoundToggle k="terminal.optionAsMeta" label="Use Option as Meta key" />}
         </>
       }
@@ -352,12 +353,12 @@ function ActionsOnSave() {
 function ChatAccentRow() {
   const [accent, setAccent] = useSetting<string>("agents.chatAccent");
   return (
-    <Row label="Accent colour" hint="The frame of the message box and of the messages you sent">
+    <Row label="Accent color" hint="The frame of the message box and of the messages you sent">
       <ColorSwatches
         value={accent ?? CHAT_ACCENT_PRESETS[0].value}
         presets={CHAT_ACCENT_PRESETS}
         onChange={setAccent}
-        aria-label="Accent colour"
+        aria-label="Accent color"
       />
     </Row>
   );
@@ -698,7 +699,7 @@ export const TOOLS_PAGES: PageSpec[] = [
       {
         title: "Conversation",
         options: [
-          { kind: "custom", label: "Accent colour", component: ChatAccentRow },
+          { kind: "custom", label: "Accent color", component: ChatAccentRow },
           {
             kind: "toggle",
             key: "agents.foldTurns",

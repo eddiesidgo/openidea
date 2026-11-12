@@ -89,6 +89,7 @@ import {
   changeNodeDiff,
   changeNodeDiffData,
   diffInput,
+  openDiff,
   openVcsDiff,
   opensDiffOnActivate,
   vcsDiffInFront,
@@ -355,6 +356,12 @@ export function nodeMenu(
         }
       : { kind: "action", action: "vcs.showDiff", arg: first?.path },
     {
+      kind: "action",
+      action: "vcs.showDiffInNewWindow",
+      arg: first?.path ? (opts?.roots ? changeNodeDiffData(opts.roots, first) : changeNodeDiff(first)) : undefined,
+      disabled: !first?.path,
+    },
+    {
       label: "Jump to Source",
       icon: "external-link",
       shortcut: "F4",
@@ -568,10 +575,11 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
   const viewRef = useRef<HTMLButtonElement>(null);
 
   const repos = useVcs((s) => s.roots);
+  const heads = useVcs((s) => s.heads);
   const projectRoots = useEffectiveRoots();
   const roots = useMemo(
-    () => buildChangeTree(status, root, groupByDir, lists, repos, groupByStaging),
-    [status, root, groupByDir, lists, repos, groupByStaging],
+    () => buildChangeTree(status, root, groupByDir, lists, repos, groupByStaging, heads),
+    [status, root, groupByDir, lists, repos, groupByStaging, heads],
   );
   const [byKey, parents] = useMemo(() => {
     const m = new Map<string, ChangeNode>();
@@ -620,6 +628,17 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
     followDiff(editor?.activeInput?.() ?? null);
     return editor?.onActiveInputChange?.(followDiff);
   }, [byKey, revealNode]);
+
+  // While the active tab shows one of this tree's diffs, a single selected file replaces it,
+  // keeping focus in the tree (a click or arrow key walks the changes).
+  const followSelection = (nodes: readonly ChangeNode[]) => {
+    const node = nodes.length === 1 ? nodes[0] : undefined;
+    if (mode === "dialog" || node?.type !== "file" || !node.path) return;
+    const active = maybeEditorService()?.activeInput?.();
+    if (active?.kind !== DIFF_KIND || active.key !== followedDiff.current) return;
+    if (diffInput(changeNodeDiff(node)).key === active.key) return;
+    void openDiff(changeNodeDiffData(roots, node), { preview: true, focus: false });
+  };
 
   // Reveal only after the ancestors have expanded, without moving keyboard focus.
   useLayoutEffect(() => {
@@ -715,6 +734,7 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
       {mode !== "dialog" && <OperationBanner />}
       <div
         className={styles.treeWrap}
+        data-changes-tree={mode}
         onKeyDownCapture={(e) => {
           if (checkboxes && e.key === " " && !e.metaKey && !e.ctrlKey && selected.size) {
             e.preventDefault();
@@ -732,12 +752,6 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
               e.preventDefault();
               e.stopPropagation();
               void deleteFiles(deletable);
-            }
-          } else if (e.key === "F4") {
-            const n = selectedNodes().find((x) => x.type === "file");
-            if (n?.path) {
-              e.preventDefault();
-              void editorService().openFile(n.path, { focus: true });
             }
           } else {
             // IDEA: Ctrl+C copies the file names, Ctrl+Shift+C the absolute paths (#1877).
@@ -780,8 +794,13 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
               selectionKeys: [...sel],
               selectedList: nodes.find((n) => n.changelist)?.changelist ?? null,
             });
+            followSelection(nodes);
           }}
           onActivate={(n) => openNode(n, roots, mode === "dialog")}
+          onJumpToSource={(n) => {
+            const file = n.type === "file" ? n : selectedNodes().find((x) => x.type === "file");
+            if (file?.path && file.kind !== "deleted") void editorService().openFile(file.path, { focus: true });
+          }}
           onContextMenu={(node, sel, e: MouseEvent) => {
             if (!node) return;
             if (node.type === "group" && node.changelist) {
@@ -872,6 +891,7 @@ export function ChangesTree({ mode }: { mode: "commit" | "local" | "dialog" }) {
                     <T>partial</T>
                   </span>
                 )}
+                {n.detail && n.detailIcon && <Icon name={n.detailIcon} size={14} className={styles.detailIcon} />}
                 {n.detail && <span className={styles.detail}>{n.detail}</span>}
               </span>
             );
@@ -967,7 +987,16 @@ export function useCommitRunner(included: number, onCommitted?: () => void): Com
 }
 
 /** Amend, message history and the message field with its inspections and failed checks. */
-export function CommitMessageField({ included, runner }: { included: number; runner: CommitRunner }) {
+export function CommitMessageField({
+  included,
+  runner,
+  autoFocus = false,
+}: {
+  included: number;
+  runner: CommitRunner;
+  /** The message takes the initial focus of the dialog it is in (the Commit dialog). */
+  autoFocus?: boolean;
+}) {
   const message = useCommit((s) => s.message);
   const amend = useCommit((s) => s.amend);
   const focusTick = useCommit((s) => s.focusTick);
@@ -1041,6 +1070,7 @@ export function CommitMessageField({ included, runner }: { included: number; run
       </div>
       <textarea
         ref={ref}
+        data-autofocus={autoFocus ? "" : undefined}
         className={clsx(styles.message, !showMargin && styles.noMargin, emptyError && styles.messageError)}
         aria-invalid={emptyError || undefined}
         style={{ ["--guide" as string]: `${margin}ch` }}
@@ -1216,7 +1246,7 @@ function CommitPanel({ included }: { included: number }) {
             className={styles.pushButton}
             disabled={!canCommit || !!remoteBusy}
             onClick={() => void runner.run(true)}
-            title="⌥⌘↩"
+            title={`${tx(commitAndPushLabel(amend))} (⌥⌘↩)`}
           >
             <span>
               <T>{commitAndPushLabel(amend)}</T>

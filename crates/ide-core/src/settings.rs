@@ -63,6 +63,8 @@ pub struct Settings {
     pub agents: AgentSettings,
     /// Agents › MCP Server (global only).
     pub mcp_server: McpServerSettings,
+    /// Tools › Agents: Command Execution Policy.
+    pub agent_security: AgentSecuritySettings,
     /// Plugin settings (`[contributes.settings]`): plugin id → its values by key.
     #[specta(type = BTreeMap<String, BTreeMap<String, specta_typescript::Unknown>>)]
     pub plugins: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
@@ -107,6 +109,11 @@ pub struct AgentSettings {
     /// The conversation's accent (`#rrggbb`): the frame of the message box and of your
     /// messages. The UI checks the value and falls back to the default.
     pub chat_accent: String,
+    /// MCP servers passed to coding agents in `session/new`, `session/load` and `session/fork`,
+    /// keyed by server name (`[agents.mcpServers.<name>]`).
+    #[serde(deserialize_with = "or_default")]
+    #[specta(type = BTreeMap<String, AgentMcpServer>)]
+    pub mcp_servers: BTreeMap<String, AgentMcpServer>,
 }
 
 /// Claude's orange: the conversation's accent until another is chosen.
@@ -129,6 +136,58 @@ impl Default for AgentSettings {
             while_running: WhileRunning::Queue,
             defaults: BTreeMap::new(),
             chat_accent: DEFAULT_CHAT_ACCENT.to_owned(),
+            mcp_servers: BTreeMap::new(),
+        }
+    }
+}
+
+/// Transport of an MCP server configured in Settings › Agents › MCP Servers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Http,
+    Sse,
+}
+
+/// An MCP server passed to coding agents in `session/new`, `session/load` and `session/fork`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AgentMcpServer {
+    #[serde(deserialize_with = "or_default")]
+    #[specta(type = McpTransport)]
+    pub transport: McpTransport,
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    /// Agent provider ids this server is enabled for (e.g. `["claude", "codex"]`);
+    /// empty means enabled for all agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<String>,
+}
+
+impl Default for AgentMcpServer {
+    fn default() -> Self {
+        Self {
+            transport: McpTransport::Stdio,
+            enabled: true,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            url: None,
+            headers: BTreeMap::new(),
+            agents: Vec::new(),
         }
     }
 }
@@ -141,6 +200,19 @@ where
     T: serde::de::DeserializeOwned + Default,
 {
     Ok(serde_json::from_value(serde_json::Value::deserialize(d)?).unwrap_or_default())
+}
+
+/// A theme id, with the built-in themes that were removed read as the Islands theme of their kind.
+fn theme_id<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let id = String::deserialize(d)?;
+    Ok(match id.as_str() {
+        "one-light" => "light".into(),
+        "one-dark" => "dark".into(),
+        _ => id,
+    })
 }
 
 /// [`AgentSettings::defaults`], keeping only the text values of each agent's table.
@@ -212,6 +284,9 @@ pub enum WhileRunning {
 pub struct McpServerSettings {
     /// Serve the tools on 127.0.0.1 while the IDE runs.
     pub enabled: bool,
+    /// Run the tools that change the project or start processes without asking first
+    /// (IDEA's brave mode). Read from the IDE's own settings only, never a project's.
+    pub run_without_confirmation: bool,
 }
 
 /// Absent profiles retain automatic discovery for existing projects.
@@ -359,6 +434,7 @@ impl Default for Settings {
             cmake: CMakeSettings::default(),
             agents: AgentSettings::default(),
             mcp_server: McpServerSettings::default(),
+            agent_security: AgentSecuritySettings::default(),
             plugins: BTreeMap::new(),
         }
     }
@@ -404,6 +480,10 @@ pub struct GeneralSettings {
     /// Where updates come from: `auto` (the CNB mirror for the Chinese UI, else GitHub) | `github` | `cnb`.
     pub update_source: String,
     pub auto_check_updates: bool,
+    /// System Settings › Updates: open the What's New page after the app starts a new version.
+    pub show_whats_new_after_update: bool,
+    /// The version the app last started with, so the first start after an update is recognisable.
+    pub last_run_version: String,
 }
 
 impl Default for GeneralSettings {
@@ -422,6 +502,8 @@ impl Default for GeneralSettings {
             project_name: String::new(),
             update_source: "auto".into(),
             auto_check_updates: true,
+            show_whats_new_after_update: true,
+            last_run_version: String::new(),
         }
     }
 }
@@ -496,13 +578,19 @@ pub enum NavigationBarPosition {
 pub struct AppearanceSettings {
     /// A built-in theme id (`light`, `dark`, `dark-hc`, …), `system` (legacy
     /// "Sync with OS"), or a plugin's theme: `plugin:<plugin-id>/<theme-id>`.
+    #[serde(deserialize_with = "theme_id")]
+    #[specta(type = String)]
     pub theme: String,
     pub accent: String,
     pub ui_font_size: f32,
     pub locale: String,
     /// Follow the OS light/dark mode with the preferred themes below.
     pub sync_with_os: bool,
+    #[serde(deserialize_with = "theme_id")]
+    #[specta(type = String)]
     pub preferred_light_theme: String,
+    #[serde(deserialize_with = "theme_id")]
+    #[specta(type = String)]
     pub preferred_dark_theme: String,
     /// A plugin's file icon theme (`<plugin-id>/<theme-id>`); empty = the built-in icons.
     pub file_icon_theme: String,
@@ -525,7 +613,7 @@ pub struct AppearanceSettings {
     pub project_colors_in_toolbar: bool,
     pub dnd_with_alt_only: bool,
     pub menu_icons: bool,
-    /// `hamburger` | `merged`: main menu presentation in the frameless title bar.
+    /// `hamburger` | `merged` | `toolbar` (a separate row): main menu presentation in the frameless title bar.
     pub main_menu_style: String,
     /// A lone Alt press focuses or opens the main menu (IDEA `ide.windows.main.menu.focus.on.alt`).
     pub main_menu_alt: bool,
@@ -744,6 +832,9 @@ pub struct FileSettings {
     pub file_types: BTreeMap<String, FileTypeAssociation>,
     /// Override File Type: file (project-relative and `/`-separated, or absolute) → language id.
     pub file_type_overrides: BTreeMap<String, String>,
+    /// File Types › Files opened in associated applications: file-name patterns
+    /// (`*.xlsx`) opened with the system application instead of an editor.
+    pub associated_applications: Vec<String>,
     /// Compose detection choices, keyed by project-relative file path.
     pub compose_file_overrides: BTreeMap<String, ComposeFileOverride>,
 }
@@ -780,6 +871,15 @@ impl Default for FileSettings {
             local_history_max_mb: 512,
             file_types: BTreeMap::new(),
             file_type_overrides: BTreeMap::new(),
+            associated_applications: vec![
+                "*.xlsx".into(),
+                "*.xls".into(),
+                "*.docx".into(),
+                "*.doc".into(),
+                "*.pptx".into(),
+                "*.ppt".into(),
+                "*.pdf".into(),
+            ],
             compose_file_overrides: BTreeMap::new(),
         }
     }
@@ -1109,7 +1209,9 @@ pub struct MavenSettings {
     pub runner_jre: String,
     /// Project-relative root POMs removed from the Maven project model.
     pub unlinked_projects: Vec<String>,
-    /// Project-relative POMs outside the root reactor added as independent top-level projects.
+    /// POMs added as independent top-level projects. Inside the opened project the path is
+    /// project-relative (`tools/pom.xml`); outside it, the canonical absolute path. Linking
+    /// does not edit either POM.
     pub linked_projects: Vec<String>,
     /// Maven home (or its `mvn` executable); empty = the project's `mvnw`, else `mvn` on `PATH`.
     pub home: String,
@@ -1130,6 +1232,8 @@ pub struct MavenSettings {
     pub threads: String,
     /// Active Maven profiles (`-P`), comma-separated; empty leaves profiles to the POM/settings.
     pub active_profiles: String,
+    /// Delegate IDE build/run actions to Maven: launches build with Maven (`javac`) instead of jdtls (ECJ).
+    pub delegate_build: bool,
 }
 
 impl MavenSettings {
@@ -1346,6 +1450,19 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removed_one_themes_read_as_islands_themes() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"appearance":{"theme":"one-dark","preferredLightTheme":"one-light","preferredDarkTheme":"one-dark"}}"#,
+        )
+        .unwrap();
+        let a = settings.appearance;
+        assert_eq!((a.theme.as_str(), a.preferred_light_theme.as_str()), ("dark", "light"));
+        assert_eq!(a.preferred_dark_theme, "dark");
+        let kept: Settings = serde_json::from_str(r#"{"appearance":{"theme":"solarized-dark"}}"#).unwrap();
+        assert_eq!(kept.appearance.theme, "solarized-dark");
+    }
 
     #[test]
     fn window_close_settings_default_off_and_round_trip() {
@@ -1634,10 +1751,12 @@ mod maven_linkage_tests {
     fn maven_runner_jre_defaults_and_round_trips() {
         let old: MavenSettings = serde_json::from_str(r#"{"home":"/opt/maven"}"#).unwrap();
         assert!(old.runner_jre.is_empty());
+        assert!(!old.delegate_build);
         assert!(MavenSettings::default().runner_jre.is_empty());
-        let settings = MavenSettings { runner_jre: "/opt/jdk-21".into(), ..old };
+        let settings = MavenSettings { runner_jre: "/opt/jdk-21".into(), delegate_build: true, ..old };
         let encoded = serde_json::to_string(&settings).unwrap();
         assert!(encoded.contains(r#""runnerJre":"/opt/jdk-21""#));
+        assert!(encoded.contains(r#""delegateBuild":true"#));
         assert_eq!(serde_json::from_str::<MavenSettings>(&encoded).unwrap(), settings);
     }
 

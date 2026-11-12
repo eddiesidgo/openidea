@@ -49,6 +49,7 @@ import {
 } from "./cm/folding";
 import { reverseLines, sortLines } from "./cm/lines";
 import { customRegions } from "./cm/regions";
+import { toggleRenderedViewAtCaret } from "./cm/renderedDocs";
 import { enclosingHeaders } from "./cm/stickyScroll";
 import { moveElementLeft, moveElementRight } from "./cm/moveElement";
 import { caretAnchor, openPopup, updatePopup, useLspPopup, type LspPopup } from "@/editor/lsp/popupStore";
@@ -75,6 +76,8 @@ import { useProject } from "@/platform/project";
 import { call, commands } from "@/platform/ipc";
 import { editorPrefs } from "@/platform/editorSettings";
 import { notifications } from "@/workbench/contributions";
+import { togglePinSelectedContent } from "@/workbench/toolwindows/content";
+import { useToolWindowLayout } from "@/workbench/toolwindows/store";
 import { toggleReadOnly } from "./fileAttributes";
 import { openNavBarPopup } from "./view/NavBarPopup";
 import {
@@ -746,6 +749,19 @@ export function registerEditorActions(): () => void {
         else activeSlot()?.model.toggleSoftWrap();
       },
     },
+    {
+      id: "editor.toggleRenderedDocs",
+      title: "Render Documentation Comments",
+      category: "View",
+      keywords: ["render documentation comments", "javadoc", "rendered doc", "comments"],
+      when: "textEditorActive",
+      toggled: () => activeSlot()?.model.renderedDocsOn() ?? false,
+      run: () => activeSlot()?.model.toggleRenderedDocs(),
+    },
+    text("editor.toggleRenderedView", "Toggle Rendered View", (v) => toggleRenderedViewAtCaret(v), {
+      category: "View",
+      keywords: ["reader mode", "render documentation comment", "javadoc", "edit comment"],
+    }),
     text("code.foldAll", "Collapse All", (v) => collapseAll(v), { category: "Folding", icon: "collapse-all" }),
     text("code.unfoldAll", "Expand All", (v) => expandAll(v), { category: "Folding", icon: "expand-all" }),
     text("code.collapseRecursively", "Collapse Recursively", (v) => collapseRecursively(v), {
@@ -1057,8 +1073,11 @@ export function registerEditorActions(): () => void {
       title: "Pin / Unpin Tab",
       category: "Window",
       icon: "pin",
-      when: TABS_WHEN,
+      // IDEA: in a focused tool window, its selected content tab (Find, Usages).
+      when: "editorTabsOpen || toolWindowFocus",
       run: () => {
+        const tw = useToolWindowLayout.getState().focused;
+        if (tw) return void togglePinSelectedContent(tw);
         const t = activePaneTab();
         if (t) ctrl.togglePin(t.paneId, t.tabId);
       },
